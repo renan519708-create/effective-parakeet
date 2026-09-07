@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Login{% endblock %}
+{% block content %}
+<div class="auth-box panel">
+  <div class="panel-title">Entrar</div>
+  <form method="post">
+    <div class="field"><span class="field-label">Email</span><input type="email" name="email" required autofocus></div>
+    <div class="field"><span class="field-label">Senha</span><input type="password" name="password" required></div>
+    <button class="btn" type="submit" style="width:100%;">Entrar</button>
+  </form>
+  <p class="sub" style="margin-top:14px;">Cadastro só por convite -- peça um código a quem já usa a plataforma.</p>
+</div>
+{% endblock %}

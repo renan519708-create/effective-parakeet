@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Minha Conta{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <div class="panel-title">Chave de API (Binance Futures)</div>
+  {% if has_key %}
+    <p class="sub">Chave salva {{ '(valida)' if key_valid else '(marcada como invalida -- salve uma nova)' }}. Por segurança, o valor nunca é mostrado de novo aqui -- para trocar, cole uma nova chave abaixo.</p>
+  {% else %}
+    <p class="sub">Cole aqui uma chave <strong>sem permissão de saque</strong> -- só habilite Futures (abrir/fechar posição).</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('follower.save_api_key') }}">
+    <div class="row2">
+      <div class="field"><span class="field-label">API Key</span><input type="text" name="api_key" required></div>
+      <div class="field"><span class="field-label">API Secret</span><input type="password" name="api_secret" required></div>
+    </div>
+    <button class="btn" type="submit">Validar e salvar</button>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel-title">Minhas configurações</div>
+  <form method="post" action="{{ url_for('follower.save_settings') }}">
+    <div class="row2">
+      <div class="field"><span class="field-label">% de risco por campanha</span><input type="number" step="0.1" name="risk_pct" value="{{ settings.risk_pct }}"></div>
+      <div class="field"><span class="field-label">Alavancagem (x)</span><input type="number" name="leverage" value="{{ settings.leverage }}" min="1" max="125"></div>
+    </div>
+    <div class="toggle-row">
+      <span class="field-label">Drawdown máximo da minha carteira</span>
+      <input type="checkbox" name="max_drawdown_enabled" {% if settings.max_drawdown_enabled %}checked{% endif %}>
+    </div>
+    <div class="field"><span class="field-label">Limite de queda desde o pico (%)</span><input type="number" step="1" name="max_drawdown_pct" value="{{ settings.max_drawdown_pct }}"></div>
+    <button class="btn" type="submit">Salvar configurações</button>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel-title">Seguir operações</div>
+  <p class="sub">Status atual: <strong>{{ 'seguindo' if settings.following_enabled else 'parado' }}</strong></p>
+  <form method="post" action="{{ url_for('follower.toggle_following') }}">
+    <button class="btn {{ 'btn-stop' if settings.following_enabled else 'btn-long' }}" type="submit">
+      {{ 'Parar de seguir' if settings.following_enabled else 'Seguir operações' }}
+    </button>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel-title">Posições abertas ({{ open_positions|length }})</div>
+  {% if open_positions %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Símbolo</th><th>Lado</th><th>Entrada</th><th>Aberta em</th></tr></thead>
+    <tbody>
+    {% for p in open_positions %}
+      <tr>
+        <td>{{ p.symbol }}</td>
+        <td><span class="side-tag {{ 'side-long' if p.side == 'long' else 'side-short' }}">{{ p.side.upper() }}</span></td>
+        <td>{{ p.entry_price }}</td>
+        <td>{{ p.opened_at }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<div class="empty-state">Nenhuma posição aberta.</div>{% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel-title">Histórico ({{ closed_positions|length }})</div>
+  {% if closed_positions %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Símbolo</th><th>Lado</th><th>Entrada</th><th>Saída</th><th>Motivo</th><th>PnL USD</th></tr></thead>
+    <tbody>
+    {% for p in closed_positions %}
+      <tr>
+        <td>{{ p.symbol }}</td>
+        <td><span class="side-tag {{ 'side-long' if p.side == 'long' else 'side-short' }}">{{ p.side.upper() }}</span></td>
+        <td>{{ p.entry_price }}</td>
+        <td>{{ p.close_price }}</td>
+        <td>{{ p.close_reason }}</td>
+        <td class="{{ 'pnl-pos' if (p.realized_pnl_usd or 0) >= 0 else 'pnl-neg' }}">{{ '%.2f'|format(p.realized_pnl_usd or 0) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<div class="empty-state">Nenhuma operação encerrada ainda.</div>{% endif %}
+</div>
+{% endblock %}

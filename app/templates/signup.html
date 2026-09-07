@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Cadastro{% endblock %}
+{% block content %}
+<div class="auth-box panel">
+  <div class="panel-title">Criar conta</div>
+  <form method="post">
+    <div class="field"><span class="field-label">Código de convite</span><input type="text" name="invite_code" required autofocus></div>
+    <div class="field"><span class="field-label">Email</span><input type="email" name="email" required></div>
+    <div class="field"><span class="field-label">Senha (mín. 8 caracteres)</span><input type="password" name="password" minlength="8" required></div>
+    <button class="btn" type="submit" style="width:100%;">Criar conta</button>
+  </form>
+  <p class="sub" style="margin-top:14px;">Já tem conta? <a href="{{ url_for('auth.login') }}">Entrar</a></p>
+</div>
+{% endblock %}
