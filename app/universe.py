@@ -95,6 +95,13 @@ def resolve_symbol_universe(scope, params, ref_ms, testnet):
             f"{c['symbol'].upper()}USDT" for c in market_list
             if c["symbol"].lower() != "btc" and f"{c['symbol'].upper()}USDT" in valid_symbols
         ]
+        # Cap the pool before the one-network-call-per-candidate ranking
+        # below -- market_list can hand back 150-200+ eligible symbols,
+        # and at ~0.1-0.3s per candidate (klines fetch + the sleep that
+        # avoids hitting Binance's rate limit) that's well past gunicorn's
+        # request timeout. Top 80 by market cap is still a wide enough
+        # pool for the relative-strength ranking to mean something.
+        candidates = candidates[:80]
         top_n = int(params.get("topN", 10))
         lookback_days = int(params.get("lookbackDays", 30))
         ranked = rank_by_relative_strength_vs_btc(candidates, ref_ms, lookback_days, testnet)

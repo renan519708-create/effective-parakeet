@@ -24,7 +24,14 @@ services:
     region: frankfurt
     plan: starter
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn wsgi:app"
+    # timeout 180 -- "Top N forca vs BTC" resolves its candidate universe
+    # synchronously inside the request (one network call per candidate
+    # symbol, see app/universe.py), which can run past gunicorn's 30s
+    # default and get killed mid-request ("WORKER TIMEOUT", confirmed
+    # live). Raised here instead of moving that work into the engine
+    # thread, since the operator needs the resolved symbol list back
+    # before the campaign can be created.
+    startCommand: "gunicorn wsgi:app --timeout 180"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
