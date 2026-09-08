@@ -156,7 +156,8 @@ def start_campaign():
     elif scope in ("topn", "relbtc", "relbtc_weak"):
         params["topN"] = _parse_int(request.form.get("top_n"), 10)
         if scope in ("relbtc", "relbtc_weak"):
-            params["lookbackDays"] = _parse_int(request.form.get("lookback_days"), 30)
+            params["lookbackValue"] = _parse_int(request.form.get("lookback_value"), 30)
+            params["lookbackUnit"] = "hours" if request.form.get("lookback_unit") == "hours" else "days"
     elif scope == "ranks":
         params["ranks"] = [int(r.strip()) for r in (request.form.get("ranks") or "").split(",") if r.strip().isdigit()]
 

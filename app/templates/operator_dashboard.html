@@ -58,7 +58,15 @@
       </div>
       <div class="row2">
         <div class="field"><span class="field-label">Ranks (se ranks, separados por vírgula)</span><input type="text" name="ranks" placeholder="3,6,5,12"></div>
-        <div class="field"><span class="field-label">Janela vs BTC em dias (se relbtc)</span><input type="number" name="lookback_days" value="30"></div>
+        <div class="field"><span class="field-label">Janela de comparação (se relbtc)</span>
+          <div style="display:flex; gap:8px;">
+            <input type="number" name="lookback_value" value="30" style="flex:1;">
+            <select name="lookback_unit" style="flex:1;">
+              <option value="days" selected>Dias</option>
+              <option value="hours">Horas</option>
+            </select>
+          </div>
+        </div>
       </div>
       <div class="field"><span class="field-label">Stop-loss por operação (% ROI sobre margem)</span><input type="number" step="0.1" name="stop_pct" value="2.5"></div>
       <button class="btn btn-long" type="submit" name="direction" value="long">▲ Long</button>

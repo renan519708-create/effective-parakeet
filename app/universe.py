@@ -79,9 +79,9 @@ def _ranked_by_volume(testnet):
     return ranked
 
 
-def fetch_daily_return(symbol, from_ms, to_ms, testnet):
+def fetch_kline_return(symbol, from_ms, to_ms, interval, testnet):
     resp = requests.get(f"{_base_url(testnet)}/fapi/v1/klines", params={
-        "symbol": symbol, "interval": "1d", "startTime": from_ms, "endTime": to_ms, "limit": 1000,
+        "symbol": symbol, "interval": interval, "startTime": from_ms, "endTime": to_ms, "limit": 1000,
     }, timeout=15)
     resp.raise_for_status()
     raw = resp.json()
@@ -93,15 +93,20 @@ def fetch_daily_return(symbol, from_ms, to_ms, testnet):
     return (last_close / first_close) - 1
 
 
-def rank_by_relative_strength_vs_btc(candidate_symbols, ref_ms, lookback_days, testnet):
-    from_ms = ref_ms - lookback_days * 24 * 3600 * 1000
-    btc_return = fetch_daily_return("BTCUSDT", from_ms, ref_ms, testnet)
+def rank_by_relative_strength_vs_btc(candidate_symbols, ref_ms, window_ms, interval, testnet):
+    """interval: a Binance kline interval ("1h" or "1d") matched to the
+    comparison window's unit -- 1d candles have no useful resolution
+    for a window measured in hours (e.g. "forca nas ultimas 4h" can't
+    be measured with one whole day's candle), while 1d stays the more
+    efficient choice for longer, day-scale windows."""
+    from_ms = ref_ms - window_ms
+    btc_return = fetch_kline_return("BTCUSDT", from_ms, ref_ms, interval, testnet)
     results = []
     for symbol in candidate_symbols:
         if symbol == "BTCUSDT":
             continue
         try:
-            ret = fetch_daily_return(symbol, from_ms, ref_ms, testnet)
+            ret = fetch_kline_return(symbol, from_ms, ref_ms, interval, testnet)
             results.append({"symbol": symbol, "rel_strength": (ret - btc_return) * 100})
         except (requests.RequestException, ValueError):
             pass
@@ -129,8 +134,15 @@ def resolve_symbol_universe(scope, params, ref_ms, testnet):
         # for the relative-strength ranking to mean something.
         candidates = candidates[:80]
         top_n = int(params.get("topN", 10))
-        lookback_days = int(params.get("lookbackDays", 30))
-        ranked = rank_by_relative_strength_vs_btc(candidates, ref_ms, lookback_days, testnet)
+        lookback_value = int(params.get("lookbackValue", 30))
+        lookback_unit = params.get("lookbackUnit", "days")
+        if lookback_unit == "hours":
+            window_ms = lookback_value * 3600 * 1000
+            interval = "1h"
+        else:
+            window_ms = lookback_value * 24 * 3600 * 1000
+            interval = "1d"
+        ranked = rank_by_relative_strength_vs_btc(candidates, ref_ms, window_ms, interval, testnet)
         if not ranked:
             raise ValueError("nao foi possivel calcular forca relativa vs BTC para nenhum candidato")
         is_weak = scope == "relbtc_weak"
