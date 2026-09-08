@@ -7,3 +7,4 @@ instance/
 *.log
 .venv/
 venv/
+.superpowers/
