@@ -2,6 +2,15 @@
 {% block title %}Painel do Operador{% endblock %}
 {% block content %}
 
+{% if campaign %}
+<script>
+  // Server-rendered page, no live ticker -- reload periodically while a
+  // campaign is active so entry/agora/% keep tracking the market
+  // without the operator needing to hit F5 manually.
+  setTimeout(function () { window.location.reload(); }, 15000);
+</script>
+{% endif %}
+
 <div class="panel">
   <div class="panel-title">Campanha</div>
   {% if campaign %}

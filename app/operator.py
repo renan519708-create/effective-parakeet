@@ -52,10 +52,20 @@ def dashboard():
             current_prices = fetch_prices([s.symbol for s in campaign.symbols], current_app.config["BINANCE_TESTNET"])
         except Exception:  # noqa: BLE001 -- a price hiccup must never break the dashboard, table just shows "-"
             current_prices = {}
+        backfilled = False
         for s in campaign.symbols:
             current = current_prices.get(s.symbol)
+            if s.entry_price is None and current is not None:
+                # Campaigns created before entry_price existed (or where
+                # the fetch at creation time failed) would show "-"
+                # forever otherwise. Not the true entry price, but lets
+                # %-tracking start from here instead of never at all.
+                s.entry_price = current
+                backfilled = True
             pct = price_roi_pct(campaign.direction, s.entry_price, current, 1) if (s.entry_price and current) else None
             live[s.symbol] = {"current": current, "pct": pct}
+        if backfilled:
+            db.session.commit()
 
     return render_template(
         "operator_dashboard.html",
