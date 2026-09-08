@@ -53,6 +53,29 @@ def dashboard():
     )
 
 
+def _parse_float(raw, default):
+    """request.form values are always strings -- a browser/OS set to
+    pt-BR can hand back "2,5" instead of "2.5" for a <input
+    type="number">, which float() rejects outright. Accepting either
+    decimal separator here is what stands between a stray comma and an
+    unhandled 500 (this exact crash happened live)."""
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw.strip().replace(",", "."))
+    except ValueError:
+        return default
+
+
+def _parse_int(raw, default):
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
+
+
 @operator_bp.route("/campanha/iniciar", methods=["POST"])
 @operator_required
 def start_campaign():
@@ -61,31 +84,36 @@ def start_campaign():
         return redirect(url_for("operator.dashboard"))
 
     direction = request.form.get("direction")
+    if direction not in ("long", "short"):
+        flash("Escolha Long ou Short.", "error")
+        return redirect(url_for("operator.dashboard"))
+
     scope = request.form.get("scope", "single")
-    stop_pct = float(request.form.get("stop_pct", 2.5))
+    stop_pct = _parse_float(request.form.get("stop_pct"), 2.5)
     params = {}
     if scope == "single":
-        params["symbol"] = request.form.get("symbol", "BTCUSDT").upper()
+        params["symbol"] = (request.form.get("symbol") or "BTCUSDT").upper()
     elif scope in ("topn", "relbtc", "relbtc_weak"):
-        params["topN"] = int(request.form.get("top_n", 10))
+        params["topN"] = _parse_int(request.form.get("top_n"), 10)
         if scope in ("relbtc", "relbtc_weak"):
-            params["lookbackDays"] = int(request.form.get("lookback_days", 30))
+            params["lookbackDays"] = _parse_int(request.form.get("lookback_days"), 30)
     elif scope == "ranks":
-        params["ranks"] = [int(r.strip()) for r in request.form.get("ranks", "").split(",") if r.strip().isdigit()]
+        params["ranks"] = [int(r.strip()) for r in (request.form.get("ranks") or "").split(",") if r.strip().isdigit()]
 
     testnet = current_app.config["BINANCE_TESTNET"]
     try:
         resolved = resolve_symbol_universe(scope, params, int(datetime.now(timezone.utc).timestamp() * 1000), testnet)
-    except Exception as e:  # noqa: BLE001 -- surface any upstream failure as a flash, not a 500
-        flash(f"Nao foi possivel resolver o universo de simbolos: {e}", "error")
-        return redirect(url_for("operator.dashboard"))
 
-    campaign = Campaign(direction=direction, universe_scope=scope, universe_params=params, stop_pct=stop_pct, status="active", started_by_id=current_user.id)
-    db.session.add(campaign)
-    db.session.flush()
-    for item in resolved:
-        db.session.add(CampaignSymbol(campaign_id=campaign.id, symbol=item["symbol"], rank=item["rank"]))
-    db.session.commit()
+        campaign = Campaign(direction=direction, universe_scope=scope, universe_params=params, stop_pct=stop_pct, status="active", started_by_id=current_user.id)
+        db.session.add(campaign)
+        db.session.flush()
+        for item in resolved:
+            db.session.add(CampaignSymbol(campaign_id=campaign.id, symbol=item["symbol"], rank=item["rank"]))
+        db.session.commit()
+    except Exception as e:  # noqa: BLE001 -- surface any failure as a flash, never a raw 500
+        db.session.rollback()
+        flash(f"Nao foi possivel iniciar a campanha: {e}", "error")
+        return redirect(url_for("operator.dashboard"))
 
     flash(f"Campanha {direction.upper()} iniciada com {len(resolved)} simbolo(s).", "success")
     return redirect(url_for("operator.dashboard"))
