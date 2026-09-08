@@ -17,6 +17,7 @@
     <div>
       {% if current_user.can_operate %}<a class="btn" href="{{ url_for('operator.dashboard') }}">Painel do operador</a>{% endif %}
       <a class="btn" href="{{ url_for('follower.dashboard') }}">Minha conta</a>
+      <a class="btn" href="{{ url_for('results.dashboard') }}">Resultados</a>
       <a class="btn" href="{{ url_for('auth.logout') }}">Sair</a>
     </div>
   </div>

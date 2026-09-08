@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Resultados{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <div class="panel-title">Resultados</div>
+
+  <div style="display:flex; gap:8px; margin-bottom:12px;">
+    <a class="radio-opt {{ 'active' if view == 'mine' }}" href="{{ url_for('results.dashboard', view='mine', period=period) }}">Meus resultados</a>
+    <a class="radio-opt {{ 'active' if view == 'strategy' }}" href="{{ url_for('results.dashboard', view='strategy', period=period) }}">Histórico da estratégia</a>
+  </div>
+
+  <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+    {% for value, label in period_labels %}
+      <a class="radio-opt {{ 'active' if period == value }}" href="{{ url_for('results.dashboard', view=view, period=value) }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+
+  {% if rows %}
+    <p class="sub" style="margin-bottom:6px;">
+      Resultado acumulado no período:
+      <strong class="{{ 'pnl-pos' if final_pct >= 0 else 'pnl-neg' }}">{{ '%+.2f%%'|format(final_pct) }}</strong>
+    </p>
+    <div style="margin-bottom:16px;">{{ chart_svg|safe }}</div>
+
+    <div class="table-wrap"><table>
+      <thead><tr><th>Símbolo</th><th>Entrada</th><th>Saída</th><th>Resultado</th><th>Data</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.symbol }}</td>
+          <td>{{ '%.4f'|format(r.entry) }}</td>
+          <td>{{ '%.4f'|format(r.exit) }}</td>
+          <td class="{{ 'pnl-pos' if r.pct >= 0 else 'pnl-neg' }}">{{ '%+.2f%%'|format(r.pct) }}</td>
+          <td>{{ r.at }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  {% else %}
+    <div class="empty-state">
+      {% if view == 'mine' %}Nenhuma operação sua encerrada nesse período.{% else %}Nenhuma campanha encerrada nesse período.{% endif %}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

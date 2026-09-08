@@ -49,10 +49,12 @@ def create_app(config_class=Config, start_engine=True):
     from app.auth import auth_bp
     from app.operator import operator_bp
     from app.follower import follower_bp
+    from app.results import results_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(operator_bp)
     app.register_blueprint(follower_bp)
+    app.register_blueprint(results_bp)
 
     with app.app_context():
         db.create_all()
