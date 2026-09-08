@@ -3,9 +3,26 @@ starts the background trading engine. `python manage.py runserver` or
 a WSGI server (gunicorn "app:create_app()") both go through here."""
 
 from flask import Flask
+from sqlalchemy import text
 
 from app.config import Config
 from app.extensions import db, login_manager
+
+
+def _patch_schema():
+    """db.create_all() only creates tables that don't exist yet -- it
+    never alters an existing table's columns. Since this app runs
+    against a live Postgres DB with real campaign data and has no
+    Alembic migrations (deliberate v1 choice, see design doc), a column
+    added to a model after the first deploy needs to be added here too,
+    or it silently never appears on Render. `ADD COLUMN IF NOT EXISTS`
+    is idempotent, so this is safe to run on every startup."""
+    statements = [
+        "ALTER TABLE campaign_symbols ADD COLUMN IF NOT EXISTS entry_price DOUBLE PRECISION",
+    ]
+    for stmt in statements:
+        db.session.execute(text(stmt))
+    db.session.commit()
 
 
 def create_app(config_class=Config, start_engine=True):
@@ -38,6 +55,7 @@ def create_app(config_class=Config, start_engine=True):
 
     with app.app_context():
         db.create_all()
+        _patch_schema()
 
     if start_engine:
         from app.engine import start_background_engine

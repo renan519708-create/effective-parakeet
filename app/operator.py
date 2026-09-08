@@ -9,8 +9,9 @@ from functools import wraps
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
+from app.engine import fetch_prices, price_roi_pct
 from app.extensions import db
-from app.models import Campaign, CampaignSymbol, InviteCode, User
+from app.models import Campaign, CampaignSymbol, FollowerAllocation, FollowerCampaignState, InviteCode, Position, User
 from app.universe import resolve_symbol_universe
 
 operator_bp = Blueprint("operator", __name__, url_prefix="/operador")
@@ -44,12 +45,25 @@ def dashboard():
     campaign = Campaign.query.filter(Campaign.status.in_(["active", "stopping"])).first()
     last_campaigns = Campaign.query.order_by(Campaign.started_at.desc()).limit(20).all()
     invites = InviteCode.query.order_by(InviteCode.created_at.desc()).limit(20).all() if current_user.role == "owner" else []
+
+    live = {}
+    if campaign:
+        try:
+            current_prices = fetch_prices([s.symbol for s in campaign.symbols], current_app.config["BINANCE_TESTNET"])
+        except Exception:  # noqa: BLE001 -- a price hiccup must never break the dashboard, table just shows "-"
+            current_prices = {}
+        for s in campaign.symbols:
+            current = current_prices.get(s.symbol)
+            pct = price_roi_pct(campaign.direction, s.entry_price, current, 1) if (s.entry_price and current) else None
+            live[s.symbol] = {"current": current, "pct": pct}
+
     return render_template(
         "operator_dashboard.html",
         campaign=campaign,
         last_campaigns=last_campaigns,
         invites=invites,
         is_owner=current_user.role == "owner",
+        live=live,
     )
 
 
@@ -107,8 +121,16 @@ def start_campaign():
         campaign = Campaign(direction=direction, universe_scope=scope, universe_params=params, stop_pct=stop_pct, status="active", started_by_id=current_user.id)
         db.session.add(campaign)
         db.session.flush()
+        # Reference price at campaign start, for the dashboard's live
+        # %-move column -- best effort: a failed price fetch here must
+        # never block the campaign itself from starting, entry_price
+        # just stays null and the dashboard shows "-" for that symbol.
+        try:
+            entry_prices = fetch_prices([item["symbol"] for item in resolved], testnet)
+        except Exception:  # noqa: BLE001
+            entry_prices = {}
         for item in resolved:
-            db.session.add(CampaignSymbol(campaign_id=campaign.id, symbol=item["symbol"], rank=item["rank"]))
+            db.session.add(CampaignSymbol(campaign_id=campaign.id, symbol=item["symbol"], rank=item["rank"], entry_price=entry_prices.get(item["symbol"])))
         db.session.commit()
     except Exception as e:  # noqa: BLE001 -- surface any failure as a flash, never a raw 500
         db.session.rollback()
@@ -143,6 +165,31 @@ def reset_campaign():
         campaign.ended_at = datetime.now(timezone.utc)
         db.session.commit()
     flash("Pronto para uma nova campanha.", "success")
+    return redirect(url_for("operator.dashboard"))
+
+
+@operator_bp.route("/campanha/<int:campaign_id>/apagar", methods=["POST"])
+@operator_required
+def delete_campaign(campaign_id):
+    campaign = Campaign.query.get(campaign_id)
+    if not campaign:
+        flash("Campanha nao encontrada.", "error")
+        return redirect(url_for("operator.dashboard"))
+    if campaign.status in ("active", "stopping"):
+        flash("Encerre a campanha antes de apagar.", "error")
+        return redirect(url_for("operator.dashboard"))
+
+    # CampaignSymbol cascades via the model relationship; these three
+    # don't have a relationship/cascade defined on Campaign, so they're
+    # cleared by hand -- otherwise the FK from each would block the
+    # delete (or, worse on a backend without FK enforcement, leave
+    # orphan rows behind).
+    FollowerAllocation.query.filter_by(campaign_id=campaign.id).delete()
+    Position.query.filter_by(campaign_id=campaign.id).delete()
+    FollowerCampaignState.query.filter_by(campaign_id=campaign.id).delete()
+    db.session.delete(campaign)
+    db.session.commit()
+    flash("Campanha apagada.", "success")
     return redirect(url_for("operator.dashboard"))
 
 

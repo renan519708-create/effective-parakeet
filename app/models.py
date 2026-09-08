@@ -99,6 +99,13 @@ class CampaignSymbol(db.Model):
     campaign_id = db.Column(db.Integer, db.ForeignKey("campaigns.id"), nullable=False)
     symbol = db.Column(db.String(20), nullable=False)
     rank = db.Column(db.Integer, nullable=True)
+    # Reference price at the moment the campaign started (not any one
+    # follower's real fill -- followers open at slightly different
+    # prices/times). Lets the operator dashboard show a live %-move per
+    # symbol without depending on any follower having opened a position
+    # yet. Nullable: a failed price fetch at campaign-start time must
+    # never block campaign creation (see operator.start_campaign).
+    entry_price = db.Column(db.Float, nullable=True)
 
 
 class FollowerAllocation(db.Model):

@@ -12,9 +12,18 @@
       Stop: {{ campaign.stop_pct }}%
     </p>
     <div class="table-wrap" style="margin-bottom:14px;"><table>
-      <thead><tr><th>Símbolo</th><th>Rank</th></tr></thead>
+      <thead><tr><th>Símbolo</th><th>Rank</th><th>Entrada</th><th>Agora</th><th>%</th></tr></thead>
       <tbody>
-      {% for s in campaign.symbols %}<tr><td>{{ s.symbol }}</td><td>{{ s.rank or '-' }}</td></tr>{% endfor %}
+      {% for s in campaign.symbols %}
+        {% set l = live.get(s.symbol, {}) %}
+        <tr>
+          <td>{{ s.symbol }}</td>
+          <td>{{ s.rank or '-' }}</td>
+          <td>{{ '%.4f'|format(s.entry_price) if s.entry_price else '-' }}</td>
+          <td>{{ '%.4f'|format(l.current) if l.current else '-' }}</td>
+          <td class="{{ '' if l.pct is none else ('pnl-pos' if l.pct >= 0 else 'pnl-neg') }}">{{ '%+.2f%%'|format(l.pct) if l.pct is not none else '-' }}</td>
+        </tr>
+      {% endfor %}
       </tbody>
     </table></div>
     <form method="post" action="{{ url_for('operator.stop_campaign') }}" style="display:inline;">
@@ -77,7 +86,7 @@
 <div class="panel">
   <div class="panel-title">Últimas campanhas</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Direção</th><th>Universo</th><th>Status</th><th>Início</th><th>Fim</th></tr></thead>
+    <thead><tr><th>Direção</th><th>Universo</th><th>Status</th><th>Início</th><th>Fim</th><th></th></tr></thead>
     <tbody>
     {% for c in last_campaigns %}
       <tr>
@@ -86,6 +95,13 @@
         <td>{{ c.status }}</td>
         <td>{{ c.started_at }}</td>
         <td>{{ c.ended_at or '-' }}</td>
+        <td>
+          {% if c.status not in ('active', 'stopping') %}
+          <form method="post" action="{{ url_for('operator.delete_campaign', campaign_id=c.id) }}" onsubmit="return confirm('Apagar esta campanha e todo o historico de posicoes/alocacoes ligado a ela? Essa acao nao pode ser desfeita.');" style="display:inline;">
+            <button class="btn btn-stop" type="submit" style="padding:3px 9px; font-size:11px;">Apagar</button>
+          </form>
+          {% endif %}
+        </td>
       </tr>
     {% endfor %}
     </tbody>
