@@ -6,7 +6,7 @@
 # README.md's Deploy section for exactly which ones and why).
 databases:
   - name: copy-trading-db
-    plan: free
+    plan: starter
     databaseName: copy_trading
     user: copy_trading
 
@@ -14,7 +14,7 @@ services:
   - type: web
     name: copy-trading-web
     env: python
-    plan: free
+    plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn wsgi:app"
     envVars:
@@ -33,9 +33,10 @@ services:
   # to idle when quiet, so this is the piece that must stay always-on
   # to keep checking real stop-losses -- see app/engine.py's
   # run_forever docstring for why this has to be its own process
-  # instead of living inside the web service. Render's free tier does
-  # not offer Background Workers; this needs a paid plan before going
-  # live with real money.
+  # instead of living inside the web service. Render doesn't offer a
+  # free tier for any of these three resources anymore (Blueprint
+  # deploys require payment info on file), but this one specifically
+  # must never be downgraded to a plan that idles/sleeps.
   - type: worker
     name: copy-trading-engine
     env: python
