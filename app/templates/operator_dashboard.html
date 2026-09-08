@@ -28,7 +28,7 @@
         <tr>
           <td>{{ s.symbol }}</td>
           <td>{{ s.rank or '-' }}</td>
-          <td>{{ '%.4f'|format(s.entry_price) if s.entry_price else '-' }}</td>
+          <td>{{ '%.4f'|format(l.entry) if l.entry else '-' }}</td>
           <td>{{ '%.4f'|format(l.current) if l.current else '-' }}</td>
           <td class="{{ '' if l.pct is none else ('pnl-pos' if l.pct >= 0 else 'pnl-neg') }}">{{ '%+.2f%%'|format(l.pct) if l.pct is not none else '-' }}</td>
         </tr>
