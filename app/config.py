@@ -34,4 +34,9 @@ class Config:
 
     ENGINE_TICK_SECONDS = float(os.environ.get("ENGINE_TICK_SECONDS", "5"))
 
+    # How many follower accounts the engine processes at once (real
+    # Binance calls are I/O-bound, so threads give real concurrency
+    # here) -- same idea as gg-shot-monitor's FETCH_WORKERS.
+    ENGINE_MAX_WORKERS = int(os.environ.get("ENGINE_MAX_WORKERS", "20"))
+
     REQUIRED = ("SECRET_KEY", "SQLALCHEMY_DATABASE_URI", "ENCRYPTION_KEY")

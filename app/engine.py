@@ -10,6 +10,7 @@ own try/except, logged to OrderLog, and never allowed to block anyone
 else's account.
 """
 
+import concurrent.futures
 import threading
 import time
 
@@ -143,60 +144,102 @@ def _close_position(broker, position, fallback_price, reason, user_id, leverage,
 
 def run_tick(app):
     """One full pass over the single active/stopping campaign (if any).
-    Meant to be called repeatedly by start_background_engine -- every
-    follower is wrapped in its own try/except so one bad account never
-    blocks the rest.
+    Meant to be called repeatedly by start_background_engine.
+
+    Every account is processed in its own worker thread (ThreadPoolExecutor,
+    ENGINE_MAX_WORKERS at a time) with its own Flask app context -- Flask-
+    SQLAlchemy's session is scoped per app context, so each thread gets its
+    own independent DB session rather than fighting over one shared session.
+    Real Binance calls are I/O-bound, so this is genuine concurrency, not
+    just cosmetic: with many accounts, "Encerrar operacoes" (or a stop-loss
+    during a fast move) closes everyone at roughly the same time instead of
+    working through the list one account at a time. Each account's own
+    try/except still means one bad account never blocks the rest.
 
     Campaign.status:
-    - "active": the normal Case A-D flow below.
-    - "stopping": operator clicked "Encerrar operacoes" -- the HTTP
-      request handler just flips this flag and returns immediately
-      (closing many real positions synchronously inside a web request
-      would be slow and could time out); this tick is what actually
-      places the real close orders, for every account with any open
-      position regardless of their own following_enabled toggle. Once
-      no open positions remain campaign-wide, flips to "stopped".
+    - "active": the normal Case A-D flow in _process_follower.
+    - "stopping": operator clicked "Encerrar operacoes" -- the HTTP request
+      handler just flips this flag and returns immediately (closing many
+      real positions synchronously inside a web request would be slow and
+      could time out); this tick is what actually places the real close
+      orders, for every account with any open position regardless of their
+      own following_enabled toggle. Once no open positions remain
+      campaign-wide, flips to "stopped".
     """
     with app.app_context():
         campaign = Campaign.query.filter(Campaign.status.in_(["active", "stopping"])).first()
         if not campaign:
             return
-
+        campaign_id = campaign.id
+        campaign_status = campaign.status
         symbols = [cs.symbol for cs in campaign.symbols]
-        try:
-            prices = fetch_prices(symbols, app.config["BINANCE_TESTNET"])
-        except requests.RequestException as e:
-            app.logger.error(f"[engine] falha ao buscar precos: {e}")
-            return
 
-        if campaign.status == "stopping":
-            _run_stopping_tick(app, campaign, prices)
-            return
+    try:
+        prices = fetch_prices(symbols, app.config["BINANCE_TESTNET"])
+    except requests.RequestException as e:
+        app.logger.error(f"[engine] falha ao buscar precos: {e}")
+        return
 
-        eligible = (
-            User.query.join(FollowerSettings)
-            .filter(FollowerSettings.following_enabled.is_(True))
-            .all()
-        )
-        for user in eligible:
-            try:
-                _process_follower(app, campaign, user, prices)
+    max_workers = app.config["ENGINE_MAX_WORKERS"]
+
+    if campaign_status == "stopping":
+        with app.app_context():
+            position_ids = [p.id for p in Position.query.filter_by(campaign_id=campaign_id, status="open").all()]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [pool.submit(_close_one_position_isolated, app, position_id, prices) for position_id in position_ids]
+            concurrent.futures.wait(futures)
+
+        with app.app_context():
+            if not Position.query.filter_by(campaign_id=campaign_id, status="open").first():
+                campaign = Campaign.query.get(campaign_id)
+                campaign.status = "stopped"
+                campaign.ended_at = db.func.now()
                 db.session.commit()
-            except Exception as e:  # noqa: BLE001 -- one account's bug must never stop the others
-                db.session.rollback()
-                app.logger.error(f"[engine] erro processando {user.email}: {e}")
+        return
+
+    with app.app_context():
+        eligible_ids = [
+            u.id for u in User.query.join(FollowerSettings)
+            .filter(FollowerSettings.following_enabled.is_(True)).all()
+        ]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(_process_follower_isolated, app, campaign_id, user_id, prices) for user_id in eligible_ids]
+        concurrent.futures.wait(futures)
 
 
-def _run_stopping_tick(app, campaign, prices):
-    open_positions = Position.query.filter_by(campaign_id=campaign.id, status="open").all()
-    for position in open_positions:
+def _process_follower_isolated(app, campaign_id, user_id, prices):
+    """Worker-thread entry point: own app context (-> own DB session),
+    re-fetches the campaign/user fresh rather than sharing ORM objects
+    across threads (SQLAlchemy objects are bound to the session that
+    loaded them, so passing them across a thread boundary is unsafe)."""
+    with app.app_context():
         try:
+            campaign = Campaign.query.get(campaign_id)
+            user = User.query.get(user_id)
+            if not campaign or not user:
+                return
+            _process_follower(app, campaign, user, prices)
+            db.session.commit()
+        except Exception as e:  # noqa: BLE001 -- one account's bug must never stop the others
+            db.session.rollback()
+            app.logger.error(f"[engine] erro processando usuario {user_id}: {e}")
+
+
+def _close_one_position_isolated(app, position_id, prices):
+    """Worker-thread entry point for the "stopping" flow -- same
+    isolated-context reasoning as _process_follower_isolated."""
+    with app.app_context():
+        try:
+            position = Position.query.get(position_id)
+            if not position or position.status != "open":
+                return
             user = User.query.get(position.user_id)
             settings = user.settings
             broker, err = _build_broker(user, app.config["ENCRYPTION_KEY"], app.config["BINANCE_TESTNET"])
             if not broker:
-                continue
-            allocation = FollowerAllocation.query.filter_by(campaign_id=campaign.id, user_id=user.id, symbol=position.symbol).first()
+                return
+            allocation = FollowerAllocation.query.filter_by(campaign_id=position.campaign_id, user_id=user.id, symbol=position.symbol).first()
             allocated_usd = allocation.allocated_usd if allocation else 0.0
             price = prices.get(position.symbol, position.entry_price)
             _close_position(broker, position, price, "Campanha-encerrada", user.id, settings.leverage, allocated_usd)
@@ -206,12 +249,7 @@ def _run_stopping_tick(app, campaign, prices):
             db.session.commit()
         except Exception as e:  # noqa: BLE001
             db.session.rollback()
-            app.logger.error(f"[engine] erro encerrando posicao {position.symbol}/{position.user_id}: {e}")
-
-    if not Position.query.filter_by(campaign_id=campaign.id, status="open").first():
-        campaign.status = "stopped"
-        campaign.ended_at = db.func.now()
-        db.session.commit()
+            app.logger.error(f"[engine] erro encerrando posicao {position_id}: {e}")
 
 
 def _process_follower(app, campaign, user, prices):
