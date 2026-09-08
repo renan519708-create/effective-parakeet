@@ -6,7 +6,7 @@
 # README.md's Deploy section for exactly which ones and why).
 databases:
   - name: copy-trading-db
-    plan: starter
+    plan: 0.5c-1g
     databaseName: copy_trading
     user: copy_trading
 
