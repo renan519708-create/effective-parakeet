@@ -333,7 +333,20 @@ def _process_follower(app, campaign, user, prices):
             if order_err:
                 _log_order(user.id, symbol, side, qty, "open", None, "failed", str(order_err))
                 continue
-            entry_price = float(order.get("avgPrice") or price)
+            # Prefer the exchange's own recorded position entry price over
+            # this order's own avgPrice -- if the account already had a
+            # leftover real position in this symbol (e.g. from an earlier
+            # campaign ended via the "Reiniciar" escape hatch, which never
+            # closes real positions), Binance blends this fill into that
+            # position server-side and the order's own avgPrice reflects
+            # only the new fill, not the blended result (confirmed live:
+            # stored entry_price disagreed with Binance's own Entry Price
+            # column by a real, non-rounding amount). Same reasoning
+            # get_position_entry_price already exists for below (Case C's
+            # redirect-to-leader blend) -- this was just the one spot that
+            # still trusted the order response alone.
+            real_entry, entry_err = broker.get_position_entry_price(symbol)
+            entry_price = real_entry if (not entry_err and real_entry) else float(order.get("avgPrice") or price)
             db.session.add(Position(campaign_id=campaign.id, user_id=user.id, symbol=symbol, side=campaign.direction, entry_price=entry_price, status="open"))
             allocation.allocated_usd = slice_usd
             allocation.state = "active"
