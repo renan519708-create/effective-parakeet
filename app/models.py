@@ -106,6 +106,11 @@ class CampaignSymbol(db.Model):
     # yet. Nullable: a failed price fetch at campaign-start time must
     # never block campaign creation (see operator.start_campaign).
     entry_price = db.Column(db.Float, nullable=True)
+    # Same idea, captured once when the campaign finishes (engine's
+    # stopping->stopped transition, or the operator's "Reiniciar" escape
+    # hatch) -- lets Ultimas campanhas show a final %-result per symbol
+    # forever after, with no live price fetch needed to display history.
+    exit_price = db.Column(db.Float, nullable=True)
 
 
 class FollowerAllocation(db.Model):

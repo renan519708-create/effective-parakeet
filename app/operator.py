@@ -9,7 +9,7 @@ from functools import wraps
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
-from app.engine import fetch_prices, price_roi_pct
+from app.engine import campaign_result_pct, fetch_prices, price_roi_pct
 from app.extensions import db
 from app.models import Campaign, CampaignSymbol, FollowerAllocation, FollowerCampaignState, InviteCode, Position, User
 from app.universe import resolve_symbol_universe
@@ -67,6 +67,8 @@ def dashboard():
         if backfilled:
             db.session.commit()
 
+    results = {c.id: campaign_result_pct(c.direction, c.symbols) for c in last_campaigns}
+
     return render_template(
         "operator_dashboard.html",
         campaign=campaign,
@@ -74,6 +76,7 @@ def dashboard():
         invites=invites,
         is_owner=current_user.role == "owner",
         live=live,
+        results=results,
     )
 
 
@@ -171,6 +174,16 @@ def reset_campaign():
     if campaign:
         # Escape hatch only -- normally a campaign reaches "stopped" on
         # its own once the engine confirms every real position closed.
+        # Still capture an exit_price per symbol here (best effort) so
+        # this path leaves Ultimas campanhas with a %-result too,
+        # instead of only the engine's normal stopping->stopped path.
+        try:
+            exit_prices = fetch_prices([s.symbol for s in campaign.symbols], current_app.config["BINANCE_TESTNET"])
+        except Exception:  # noqa: BLE001
+            exit_prices = {}
+        for s in campaign.symbols:
+            if s.exit_price is None:
+                s.exit_price = exit_prices.get(s.symbol)
         campaign.status = "stopped"
         campaign.ended_at = datetime.now(timezone.utc)
         db.session.commit()

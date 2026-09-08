@@ -95,15 +95,17 @@
 <div class="panel">
   <div class="panel-title">Últimas campanhas</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Direção</th><th>Universo</th><th>Status</th><th>Início</th><th>Fim</th><th></th></tr></thead>
+    <thead><tr><th>Direção</th><th>Universo</th><th>Status</th><th>Início</th><th>Fim</th><th>Resultado</th><th></th></tr></thead>
     <tbody>
     {% for c in last_campaigns %}
+      {% set r = results.get(c.id) %}
       <tr>
         <td><span class="side-tag {{ 'side-long' if c.direction == 'long' else 'side-short' }}">{{ c.direction.upper() }}</span></td>
         <td>{{ c.universe_scope }}</td>
         <td>{{ c.status }}</td>
         <td>{{ c.started_at }}</td>
         <td>{{ c.ended_at or '-' }}</td>
+        <td class="{{ '' if r is none else ('pnl-pos' if r >= 0 else 'pnl-neg') }}">{{ '%+.2f%%'|format(r) if r is not none else '-' }}</td>
         <td>
           {% if c.status not in ('active', 'stopping') %}
           <form method="post" action="{{ url_for('operator.delete_campaign', campaign_id=c.id) }}" onsubmit="return confirm('Apagar esta campanha e todo o historico de posicoes/alocacoes ligado a ela? Essa acao nao pode ser desfeita.');" style="display:inline;">

@@ -54,6 +54,26 @@ def pick_redirect_leader(open_rois):
     return max(open_rois, key=open_rois.get)
 
 
+def campaign_result_pct(direction, campaign_symbols):
+    """Sums each symbol's unleveraged %% move from entry_price to
+    exit_price (direction-aware, via price_roi_pct) across every symbol
+    that has both recorded -- the "some o resultado % de cada operacao"
+    figure shown next to a finished campaign in Ultimas campanhas.
+    campaign_symbols: iterable of objects/dicts with entry_price/
+    exit_price attributes or keys. Returns None (not 0.0) when no
+    symbol has both prices yet, so the caller can render "-" instead of
+    a misleading zero for a campaign with no result data."""
+    total = 0.0
+    counted = 0
+    for s in campaign_symbols:
+        entry = s.get("entry_price") if isinstance(s, dict) else s.entry_price
+        exit_ = s.get("exit_price") if isinstance(s, dict) else s.exit_price
+        if entry and exit_:
+            total += price_roi_pct(direction, entry, exit_, 1)
+            counted += 1
+    return total if counted else None
+
+
 def is_drawdown_triggered(peak_value, current_value, max_drawdown_pct):
     if peak_value <= 0:
         return False
@@ -194,6 +214,13 @@ def run_tick(app):
                 campaign = Campaign.query.get(campaign_id)
                 campaign.status = "stopped"
                 campaign.ended_at = db.func.now()
+                # Final reference price per symbol, captured once right
+                # here -- this is what Ultimas campanhas sums into a
+                # %-result forever after, with no live fetch needed to
+                # display history.
+                for cs in campaign.symbols:
+                    if cs.exit_price is None:
+                        cs.exit_price = prices.get(cs.symbol)
                 db.session.commit()
         return
 

@@ -19,6 +19,7 @@ def _patch_schema():
     is idempotent, so this is safe to run on every startup."""
     statements = [
         "ALTER TABLE campaign_symbols ADD COLUMN IF NOT EXISTS entry_price DOUBLE PRECISION",
+        "ALTER TABLE campaign_symbols ADD COLUMN IF NOT EXISTS exit_price DOUBLE PRECISION",
     ]
     for stmt in statements:
         db.session.execute(text(stmt))
