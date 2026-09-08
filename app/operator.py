@@ -52,19 +52,43 @@ def dashboard():
             current_prices = fetch_prices([s.symbol for s in campaign.symbols], current_app.config["BINANCE_TESTNET"])
         except Exception:  # noqa: BLE001 -- a price hiccup must never break the dashboard, table just shows "-"
             current_prices = {}
-        backfilled = False
+
+        # The REAL average fill price from actual open positions -- the
+        # same avgPrice Binance itself reports -- beats the synthetic
+        # reference price captured at campaign-start every time: a
+        # market order can slip against the order book, or simply land
+        # a tick or two after that reference snapshot was taken, so the
+        # snapshot-only number visibly disagreed with what the operator
+        # saw on Binance (confirmed live, e.g. DASHUSDT 62.92 here vs
+        # 63.35 real entry -- enough to flip the sign of the % shown).
+        real_entries = dict(
+            db.session.query(Position.symbol, db.func.avg(Position.entry_price))
+            .filter_by(campaign_id=campaign.id, status="open")
+            .group_by(Position.symbol)
+            .all()
+        )
+
+        changed = False
         for s in campaign.symbols:
             current = current_prices.get(s.symbol)
-            if s.entry_price is None and current is not None:
-                # Campaigns created before entry_price existed (or where
-                # the fetch at creation time failed) would show "-"
-                # forever otherwise. Not the true entry price, but lets
-                # %-tracking start from here instead of never at all.
+            real_entry = real_entries.get(s.symbol)
+            if real_entry is not None:
+                # Sync the stored reference to reality so Ultimas
+                # campanhas' eventual %-result (computed from entry_price
+                # after the campaign closes) is accurate too, not just
+                # this live view.
+                if s.entry_price != real_entry:
+                    s.entry_price = real_entry
+                    changed = True
+            elif s.entry_price is None and current is not None:
+                # No real position yet (engine hasn't ticked) and no
+                # reference stored either -- best-effort fallback so the
+                # column isn't permanently "-".
                 s.entry_price = current
-                backfilled = True
+                changed = True
             pct = price_roi_pct(campaign.direction, s.entry_price, current, 1) if (s.entry_price and current) else None
             live[s.symbol] = {"current": current, "pct": pct}
-        if backfilled:
+        if changed:
             db.session.commit()
 
     results = {c.id: campaign_result_pct(c.direction, c.symbols) for c in last_campaigns}

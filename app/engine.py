@@ -214,13 +214,21 @@ def run_tick(app):
                 campaign = Campaign.query.get(campaign_id)
                 campaign.status = "stopped"
                 campaign.ended_at = db.func.now()
-                # Final reference price per symbol, captured once right
-                # here -- this is what Ultimas campanhas sums into a
-                # %-result forever after, with no live fetch needed to
-                # display history.
+                # Real close-order fill price (same avgPrice Binance
+                # itself reports, already recorded on each Position by
+                # _close_position) beats the ticker snapshot here --
+                # same reasoning as entry_price in operator.dashboard.
+                # This is what Ultimas campanhas sums into a %-result
+                # forever after, with no live fetch needed to display
+                # history.
+                real_exits = dict(
+                    db.session.query(Position.symbol, db.func.avg(Position.close_price))
+                    .filter_by(campaign_id=campaign_id, status="closed")
+                    .group_by(Position.symbol)
+                    .all()
+                )
                 for cs in campaign.symbols:
-                    if cs.exit_price is None:
-                        cs.exit_price = prices.get(cs.symbol)
+                    cs.exit_price = real_exits.get(cs.symbol) or cs.exit_price or prices.get(cs.symbol)
                 db.session.commit()
         return
 
