@@ -4,9 +4,16 @@
 # it offers to create all three from this file; you still set the
 # secret env vars marked `sync: false` by hand in the dashboard (see
 # README.md's Deploy section for exactly which ones and why).
+#
+# region: frankfurt on all three -- Binance's API rejects calls from
+# US-based IPs ("Service unavailable from a restricted location",
+# confirmed live from Render's default `oregon` region). Region can't
+# be changed after a resource is created (Render's own docs), so this
+# must be right from the first deploy, not fixed later in place.
 databases:
   - name: copy-trading-db
     plan: 0.5c-1g
+    region: frankfurt
     databaseName: copy_trading
     user: copy_trading
 
@@ -14,6 +21,7 @@ services:
   - type: web
     name: copy-trading-web
     env: python
+    region: frankfurt
     plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn wsgi:app"
@@ -40,6 +48,7 @@ services:
   - type: worker
     name: copy-trading-engine
     env: python
+    region: frankfurt
     plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python manage.py run-engine"
