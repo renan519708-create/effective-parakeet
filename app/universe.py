@@ -5,6 +5,7 @@ endpoints, just called once by the operator when starting a campaign
 instead of live in the browser.
 """
 
+import threading
 import time
 
 import requests
@@ -17,17 +18,61 @@ STABLE_EXCLUDE = {
     "pyusd", "frax", "gusd", "lusd", "usdd", "eurt", "eurs",
 }
 
+# CoinGecko's key-less public endpoint has a low, shared rate limit --
+# Render's outbound IPs are pooled across many customers' services, so
+# a 429 ("Too Many Requests") can happen even from just this app's own
+# occasional use (confirmed live). Market-cap rank barely moves minute
+# to minute, so a short in-memory cache both avoids re-hitting
+# CoinGecko every time the operator opens the "start campaign" form and
+# gives a stale-but-good-enough fallback if a fresh fetch gets
+# rate-limited. Per gunicorn worker process, not shared across workers
+# -- still cuts real-world call volume drastically since one operator
+# clicking "iniciar" a few times in a row is the common case.
+_MARKETCAP_CACHE_TTL = 180  # seconds
+_marketcap_cache = {"data": None, "ts": 0.0}
+_marketcap_lock = threading.Lock()
+
 
 def _base_url(testnet):
     return TESTNET_BASE_URL if testnet else MAINNET_BASE_URL
 
 
 def fetch_marketcap_list():
-    resp = requests.get(COINGECKO_URL, params={
-        "vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "page": 1,
-    }, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
+    with _marketcap_lock:
+        cached, age = _marketcap_cache["data"], time.time() - _marketcap_cache["ts"]
+        if cached is not None and age < _MARKETCAP_CACHE_TTL:
+            return cached
+
+    last_error = None
+    for attempt in range(3):
+        try:
+            resp = requests.get(COINGECKO_URL, params={
+                "vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "page": 1,
+            }, timeout=15)
+            if resp.status_code == 429:
+                last_error = requests.HTTPError(f"429 Client Error: Too Many Requests for url: {resp.url}")
+                time.sleep(2 * (attempt + 1))  # backoff: 2s, then 4s
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            with _marketcap_lock:
+                _marketcap_cache["data"] = data
+                _marketcap_cache["ts"] = time.time()
+            return data
+        except requests.RequestException as e:
+            last_error = e
+            time.sleep(2 * (attempt + 1))
+
+    # Every retry failed (CoinGecko still rate-limiting/down) -- serve a
+    # stale cached list rather than blocking campaign creation entirely,
+    # as long as it's not absurdly old. A slightly outdated market-cap
+    # rank is far less disruptive than "nao foi possivel iniciar a
+    # campanha" for something that changes this slowly.
+    with _marketcap_lock:
+        cached, age = _marketcap_cache["data"], time.time() - _marketcap_cache["ts"]
+    if cached is not None and age < 1800:  # 30 min
+        return cached
+    raise last_error
 
 
 def fetch_binance_futures_symbols(testnet):
