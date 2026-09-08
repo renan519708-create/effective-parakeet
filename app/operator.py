@@ -1,8 +1,8 @@
 """Operator dashboard: trigger Long/Short campaigns, Encerrar
-operacoes, Reiniciar. Also where the Owner manages invite codes and
-promotes an account to Operator (the socio)."""
+operacoes, Reiniciar. Also where the Owner promotes an account to
+Operator (the socio) -- invite codes live under "Minha conta" (see
+app/follower.py's create_invite)."""
 
-import secrets
 from datetime import datetime, timezone
 from functools import wraps
 
@@ -11,7 +11,7 @@ from flask_login import current_user, login_required
 
 from app.engine import campaign_result_pct, fetch_prices, price_roi_pct
 from app.extensions import db
-from app.models import Campaign, CampaignSymbol, FollowerAllocation, FollowerCampaignState, InviteCode, Position, User
+from app.models import Campaign, CampaignSymbol, FollowerAllocation, FollowerCampaignState, Position, User
 from app.universe import resolve_symbol_universe
 
 operator_bp = Blueprint("operator", __name__, url_prefix="/operador")
@@ -44,7 +44,6 @@ def owner_required(view):
 def dashboard():
     campaign = Campaign.query.filter(Campaign.status.in_(["active", "stopping"])).first()
     last_campaigns = Campaign.query.order_by(Campaign.started_at.desc()).limit(20).all()
-    invites = InviteCode.query.order_by(InviteCode.created_at.desc()).limit(20).all() if current_user.role == "owner" else []
 
     live = {}
     if campaign:
@@ -108,7 +107,6 @@ def dashboard():
         "operator_dashboard.html",
         campaign=campaign,
         last_campaigns=last_campaigns,
-        invites=invites,
         is_owner=current_user.role == "owner",
         live=live,
         results=results,
@@ -248,16 +246,6 @@ def delete_campaign(campaign_id):
     db.session.delete(campaign)
     db.session.commit()
     flash("Campanha apagada.", "success")
-    return redirect(url_for("operator.dashboard"))
-
-
-@operator_bp.route("/convites/gerar", methods=["POST"])
-@owner_required
-def create_invite():
-    code = secrets.token_urlsafe(9)
-    db.session.add(InviteCode(code=code, created_by_id=current_user.id))
-    db.session.commit()
-    flash(f"Codigo de convite gerado: {code}", "success")
     return redirect(url_for("operator.dashboard"))
 
 

@@ -1,8 +1,11 @@
 """'Minha Conta': each follower manages their own Binance API key, risk
 settings, and sees only their own positions/history. Never renders a
 decrypted secret back to the browser -- once saved, the form shows a
-masked placeholder, not the real value (see app/crypto.py)."""
+masked placeholder, not the real value (see app/crypto.py). Also where
+the Owner generates invite codes (moved here from the operator
+dashboard -- it's account/access management, not campaign control)."""
 
+import secrets
 from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
@@ -11,7 +14,8 @@ from flask_login import current_user, login_required
 from app.binance_broker import BinanceBroker
 from app.crypto import encrypt_secret
 from app.extensions import db
-from app.models import ApiCredential, FollowerAllocation, OrderLog, Position
+from app.models import ApiCredential, FollowerAllocation, InviteCode, OrderLog, Position
+from app.operator import owner_required
 
 follower_bp = Blueprint("follower", __name__, url_prefix="/conta")
 
@@ -22,6 +26,8 @@ def dashboard():
     open_positions = Position.query.filter_by(user_id=current_user.id, status="open").order_by(Position.opened_at.desc()).all()
     closed_positions = Position.query.filter_by(user_id=current_user.id, status="closed").order_by(Position.closed_at.desc()).limit(100).all()
     has_key = current_user.api_credential is not None
+    is_owner = current_user.role == "owner"
+    invites = InviteCode.query.order_by(InviteCode.created_at.desc()).limit(20).all() if is_owner else []
     return render_template(
         "follower_dashboard.html",
         settings=current_user.settings,
@@ -29,7 +35,19 @@ def dashboard():
         key_valid=current_user.api_credential.is_valid if has_key else None,
         open_positions=open_positions,
         closed_positions=closed_positions,
+        is_owner=is_owner,
+        invites=invites,
     )
+
+
+@follower_bp.route("/convites/gerar", methods=["POST"])
+@owner_required
+def create_invite():
+    code = secrets.token_urlsafe(9)
+    db.session.add(InviteCode(code=code, created_by_id=current_user.id))
+    db.session.commit()
+    flash(f"Codigo de convite gerado: {code}", "success")
+    return redirect(url_for("follower.dashboard"))
 
 
 @follower_bp.route("/chave", methods=["POST"])

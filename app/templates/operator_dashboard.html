@@ -69,21 +69,6 @@
 
 {% if is_owner %}
 <div class="panel">
-  <div class="panel-title">Convites</div>
-  <form method="post" action="{{ url_for('operator.create_invite') }}">
-    <button class="btn" type="submit">Gerar novo código de convite</button>
-  </form>
-  <div class="table-wrap" style="margin-top:12px;"><table>
-    <thead><tr><th>Código</th><th>Status</th><th>Criado em</th></tr></thead>
-    <tbody>
-    {% for i in invites %}
-      <tr><td>{{ i.code }}</td><td>{{ 'usado' if i.is_used else 'disponível' }}</td><td>{{ i.created_at }}</td></tr>
-    {% endfor %}
-    </tbody>
-  </table></div>
-</div>
-
-<div class="panel">
   <div class="panel-title">Promover operador</div>
   <form method="post" action="{{ url_for('operator.promote_operator') }}">
     <div class="field"><span class="field-label">Email da conta a promover</span><input type="email" name="email" required></div>
