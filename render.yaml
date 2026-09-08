@@ -1,0 +1,55 @@
+# Render Blueprint -- https://render.com/docs/blueprint-spec
+# Defines the two services (web + the always-on engine worker) and the
+# Postgres database as one unit. After connecting this repo on Render,
+# it offers to create all three from this file; you still set the
+# secret env vars marked `sync: false` by hand in the dashboard (see
+# README.md's Deploy section for exactly which ones and why).
+databases:
+  - name: copy-trading-db
+    plan: free
+    databaseName: copy_trading
+    user: copy_trading
+
+services:
+  - type: web
+    name: copy-trading-web
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn wsgi:app"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: copy-trading-db
+          property: connectionString
+      - key: FLASK_SECRET_KEY
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: BINANCE_TESTNET
+        value: "true"
+
+  # Background Worker, NOT a web service: no HTTP traffic means nothing
+  # to idle when quiet, so this is the piece that must stay always-on
+  # to keep checking real stop-losses -- see app/engine.py's
+  # run_forever docstring for why this has to be its own process
+  # instead of living inside the web service. Render's free tier does
+  # not offer Background Workers; this needs a paid plan before going
+  # live with real money.
+  - type: worker
+    name: copy-trading-engine
+    env: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python manage.py run-engine"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: copy-trading-db
+          property: connectionString
+      - key: FLASK_SECRET_KEY
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: BINANCE_TESTNET
+        value: "true"

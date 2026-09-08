@@ -2,7 +2,8 @@
 
     python manage.py create-owner --email you@example.com --password ...
     python manage.py create-invite --by you@example.com
-    python manage.py runserver
+    python manage.py runserver     # local dev only: web + engine in one process
+    python manage.py run-engine    # production worker process (see Procfile)
 
 create-owner exists because signup is invite-only (see auth.py) --
 there's no way to create the very first account through the web UI, so
@@ -47,8 +48,19 @@ def create_invite(by_email):
 
 
 def runserver():
+    """Local dev convenience only: web server + engine thread in one
+    process. Production splits these (see wsgi.py / run-engine below)."""
     app = create_app()
     app.run(debug=True, port=5000)
+
+
+def run_engine():
+    """The production engine process (Procfile's `worker` line) --
+    always exactly one of these regardless of how many web workers
+    gunicorn runs. See app/engine.py's run_forever docstring."""
+    app = create_app(start_engine=False)
+    from app.engine import run_forever
+    run_forever(app)
 
 
 def main():
@@ -63,6 +75,7 @@ def main():
     p_invite.add_argument("--by", required=True)
 
     sub.add_parser("runserver")
+    sub.add_parser("run-engine")
 
     args = parser.parse_args()
     if args.command == "create-owner":
@@ -71,6 +84,8 @@ def main():
         create_invite(args.by)
     elif args.command == "runserver":
         runserver()
+    elif args.command == "run-engine":
+        run_engine()
 
 
 if __name__ == "__main__":

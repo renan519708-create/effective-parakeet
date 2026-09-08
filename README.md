@@ -42,17 +42,44 @@ Só as funções puras (`app/engine.py`, `app/crypto.py`) têm teste automatizad
 o motor de ordens reais é validado manualmente contra a **testnet** da Binance
 antes de qualquer chave real entrar em produção (ver seção "Verificação" da spec).
 
-## Deploy (Render/Railway)
+## Deploy (Render)
 
-1. Provisionar um Postgres gerenciado -> copiar a `DATABASE_URL`.
-2. Definir as 3 variáveis obrigatórias acima no painel do serviço.
-3. **Escolher um plano que fique sempre ativo** (não "sleep" em inatividade) --
-   o motor de monitoramento precisa continuar rodando 24/7 mesmo sem ninguém
-   acessando o site, porque é ele que protege o stop-loss de dinheiro real.
-4. Deploy via `Procfile` (`gunicorn "app:create_app()"`) -- o motor de fundo
-   inicia automaticamente dentro do mesmo processo, ver `app/__init__.py`.
-5. `python manage.py create-owner ...` uma vez, direto no ambiente de produção,
-   pra criar a primeira conta (cadastro normal é só por convite).
+A aplicação roda como **dois processos separados**, não um só -- isso é
+importante, não só uma escolha de organização:
+
+- **`web`** (`gunicorn wsgi:app`) -- serve as páginas/rotas. Pode rodar com
+  mais de uma worker sem problema.
+- **`worker`** (`python manage.py run-engine`) -- o motor que monitora posições
+  e manda ordem real. Roda como um único processo, sempre. **Nunca** rode o
+  motor dentro do processo `web` em produção: se o `web` escalar pra mais de
+  um worker (o padrão do Gunicorn), cada worker levantaria sua própria cópia
+  do motor, e você teria múltiplas instâncias tentando abrir/fechar a MESMA
+  ordem real ao mesmo tempo. `wsgi.py` já garante isso (`start_engine=False`)
+  -- só não troque o comando de start do serviço web por outra coisa que
+  chame `create_app()` sem esse parâmetro.
+
+`render.yaml` já descreve os dois serviços + o banco Postgres. Passo a passo:
+
+1. Subir este repositório pro GitHub (o Render se conecta a um repo git).
+2. No Render, "New +" -> "Blueprint" -> conectar o repo -> ele lê o
+   `render.yaml` e propõe criar `copy-trading-web`, `copy-trading-engine` e o
+   banco `copy-trading-db` de uma vez.
+3. **Antes de ativar**, definir manualmente (mesmo valor nos dois serviços,
+   web e worker):
+   - `FLASK_SECRET_KEY` -- gere com o comando da tabela acima.
+   - `ENCRYPTION_KEY` -- gere com o comando da tabela acima. **Tem que ser
+     idêntica nos dois serviços** -- é o `web` que criptografa a chave de
+     cada seguidor ao salvar, e o `worker` que descriptografa pra montar a
+     ordem real; com chaves diferentes, tudo que o `web` salvar vira lixo
+     ilegível pro `worker`.
+4. Confirmar que `copy-trading-engine` está num **plano pago** do tipo
+   Background Worker -- o Render não oferece esse tipo de serviço no free
+   tier, e é exatamente esse serviço que precisa ficar sempre ativo (ele não
+   tem tráfego HTTP, então não tem o conceito de "dormir por inatividade"
+   que o `web` tem -- mas também não roda de graça).
+5. Depois do primeiro deploy, `python manage.py create-owner ...` uma vez
+   (via o Shell do próprio serviço `web` no painel do Render) pra criar a
+   primeira conta -- cadastro normal pelo site é só por convite.
 
 ## Segurança -- o que já está garantido, e o que ainda depende de você
 

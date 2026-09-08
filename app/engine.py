@@ -378,19 +378,38 @@ def _process_follower(app, campaign, user, prices):
             state.status = "inactive"
 
 
-def start_background_engine(app):
-    """Starts the tick loop in a daemon thread. Called once from
-    create_app() -- runs for the lifetime of the process, independent
-    of any request or browser."""
-    def _loop():
-        interval = app.config["ENGINE_TICK_SECONDS"]
-        while True:
-            try:
-                run_tick(app)
-            except Exception as e:  # noqa: BLE001 -- the loop itself must never die
-                app.logger.error(f"[engine] erro no ciclo: {e}")
-            time.sleep(interval)
+def run_forever(app):
+    """Blocking loop: run_tick every ENGINE_TICK_SECONDS, forever,
+    never letting one bad cycle kill the loop. Used two ways:
 
-    thread = threading.Thread(target=_loop, daemon=True, name="copy-trading-engine")
+    - As a background daemon thread inside the SAME process as the web
+      server, for local development (`python manage.py runserver`) --
+      convenient, one process to run.
+    - As the entire body of a DEDICATED worker process in production
+      (`python manage.py run-engine`, see manage.py and Procfile). This
+      is the one that matters for real money: a production web server
+      normally runs with more than one worker process (gunicorn's
+      default), and each would otherwise start its OWN copy of this
+      loop -- multiple engines racing to open/close the SAME real
+      positions. Splitting the engine into its own single always-on
+      process, separate from however many web workers exist, is what
+      actually prevents that, rather than relying on "just remember to
+      pass --workers 1" as the only safeguard.
+    """
+    interval = app.config["ENGINE_TICK_SECONDS"]
+    while True:
+        try:
+            run_tick(app)
+        except Exception as e:  # noqa: BLE001 -- the loop itself must never die
+            app.logger.error(f"[engine] erro no ciclo: {e}")
+        time.sleep(interval)
+
+
+def start_background_engine(app):
+    """Starts run_forever in a daemon thread -- local/dev convenience
+    only. In production the engine runs as its own process instead
+    (see run_forever's docstring); create_app(start_engine=False) is
+    what the production WSGI entrypoint (wsgi.py) uses."""
+    thread = threading.Thread(target=run_forever, args=(app,), daemon=True, name="copy-trading-engine")
     thread.start()
     return thread
