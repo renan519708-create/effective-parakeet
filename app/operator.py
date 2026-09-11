@@ -12,7 +12,7 @@ from flask_login import current_user, login_required
 from app.engine import campaign_result_pct, fetch_prices, price_roi_pct
 from app.extensions import db
 from app.models import Campaign, CampaignSymbol, FollowerAllocation, FollowerCampaignState, Position, User
-from app.universe import resolve_symbol_universe
+from app.universe import rank_symbol_universe, resolve_symbol_universe
 
 operator_bp = Blueprint("operator", __name__, url_prefix="/operador")
 
@@ -136,35 +136,12 @@ def _parse_int(raw, default):
         return default
 
 
-@operator_bp.route("/campanha/iniciar", methods=["POST"])
-@operator_required
-def start_campaign():
-    if Campaign.query.filter(Campaign.status.in_(["active", "stopping"])).first():
-        flash("Ja existe uma campanha ativa -- encerre antes de iniciar outra.", "error")
-        return redirect(url_for("operator.dashboard"))
-
-    direction = request.form.get("direction")
-    if direction not in ("long", "short"):
-        flash("Escolha Long ou Short.", "error")
-        return redirect(url_for("operator.dashboard"))
-
-    scope = request.form.get("scope", "single")
-    stop_pct = _parse_float(request.form.get("stop_pct"), 2.5)
-    params = {}
-    if scope == "single":
-        params["symbol"] = (request.form.get("symbol") or "BTCUSDT").upper()
-    elif scope in ("topn", "relbtc", "relbtc_weak"):
-        params["topN"] = _parse_int(request.form.get("top_n"), 10)
-        if scope in ("relbtc", "relbtc_weak"):
-            params["lookbackValue"] = _parse_int(request.form.get("lookback_value"), 30)
-            params["lookbackUnit"] = "hours" if request.form.get("lookback_unit") == "hours" else "days"
-    elif scope == "ranks":
-        params["ranks"] = [int(r.strip()) for r in (request.form.get("ranks") or "").split(",") if r.strip().isdigit()]
-
-    testnet = current_app.config["BINANCE_TESTNET"]
+def _create_campaign(direction, scope, params, stop_pct, testnet, resolved):
+    """Shared tail end of starting a campaign: creates the Campaign +
+    CampaignSymbol rows for an already-resolved symbol list and best-
+    effort captures each one's reference entry price. Flashes and
+    redirects either way -- never raises back to the caller."""
     try:
-        resolved = resolve_symbol_universe(scope, params, int(datetime.now(timezone.utc).timestamp() * 1000), testnet)
-
         campaign = Campaign(direction=direction, universe_scope=scope, universe_params=params, stop_pct=stop_pct, status="active", started_by_id=current_user.id)
         db.session.add(campaign)
         db.session.flush()
@@ -185,6 +162,71 @@ def start_campaign():
         return redirect(url_for("operator.dashboard"))
 
     flash(f"Campanha {direction.upper()} iniciada com {len(resolved)} simbolo(s).", "success")
+    return redirect(url_for("operator.dashboard"))
+
+
+@operator_bp.route("/campanha/iniciar", methods=["POST"])
+@operator_required
+def start_campaign():
+    if Campaign.query.filter(Campaign.status.in_(["active", "stopping"])).first():
+        flash("Ja existe uma campanha ativa -- encerre antes de iniciar outra.", "error")
+        return redirect(url_for("operator.dashboard"))
+
+    direction = request.form.get("direction")
+    if direction not in ("long", "short"):
+        flash("Escolha Long ou Short.", "error")
+        return redirect(url_for("operator.dashboard"))
+
+    scope = request.form.get("scope", "single")
+    stop_pct = _parse_float(request.form.get("stop_pct"), 2.5)
+    testnet = current_app.config["BINANCE_TESTNET"]
+
+    if scope == "single":
+        params = {"symbol": (request.form.get("symbol") or "BTCUSDT").upper()}
+        try:
+            resolved = resolve_symbol_universe(scope, params, int(datetime.now(timezone.utc).timestamp() * 1000), testnet)
+        except Exception as e:  # noqa: BLE001
+            flash(f"Nao foi possivel iniciar a campanha: {e}", "error")
+            return redirect(url_for("operator.dashboard"))
+        return _create_campaign(direction, scope, params, stop_pct, testnet, resolved)
+
+    if scope in ("relbtc", "relbtc_weak"):
+        top_n = _parse_int(request.form.get("top_n"), 10)
+        lookback_value = _parse_int(request.form.get("lookback_value"), 30)
+        lookback_unit = "hours" if request.form.get("lookback_unit") == "hours" else "days"
+        params = {"topN": top_n, "lookbackValue": lookback_value, "lookbackUnit": lookback_unit}
+
+        if request.form.get("step") == "confirm":
+            # Coming back from the review screen -- the operator's own
+            # picks (checked candidates + anything typed manually) are
+            # the final list, no re-resolving/re-ranking here.
+            chosen = request.form.getlist("symbols")
+            extra = [s.strip().upper() for s in (request.form.get("extra_symbols") or "").split(",") if s.strip()]
+            all_symbols = list(dict.fromkeys([*chosen, *extra]))  # de-dupe, keep order
+            if not all_symbols:
+                flash("Selecione pelo menos um simbolo antes de confirmar.", "error")
+                return redirect(url_for("operator.dashboard"))
+            resolved = [{"symbol": s, "rank": i + 1} for i, s in enumerate(all_symbols)]
+            return _create_campaign(direction, scope, params, stop_pct, testnet, resolved)
+
+        # First submission -- rank the full candidate pool (every active
+        # USDT pair on Binance Futures, see universe.rank_symbol_universe)
+        # and show it for review instead of starting the campaign
+        # immediately; the operator can uncheck any of the Top N or add
+        # symbols by hand before confirming.
+        try:
+            ranked = rank_symbol_universe(scope, params, int(datetime.now(timezone.utc).timestamp() * 1000), testnet)
+        except Exception as e:  # noqa: BLE001
+            flash(f"Nao foi possivel buscar candidatos: {e}", "error")
+            return redirect(url_for("operator.dashboard"))
+        return render_template(
+            "operator_review.html",
+            candidates=ranked[:top_n],
+            direction=direction, scope=scope, stop_pct=stop_pct,
+            top_n=top_n, lookback_value=lookback_value, lookback_unit=lookback_unit,
+        )
+
+    flash("Escopo de universo desconhecido.", "error")
     return redirect(url_for("operator.dashboard"))
 
 

@@ -46,27 +46,23 @@
       <div class="field"><span class="field-label">Universo de símbolos</span>
         <select name="scope">
           <option value="single">Símbolo único</option>
-          <option value="topn">Top N volume</option>
-          <option value="ranks">Ranks específicos</option>
           <option value="relbtc">Top N força vs BTC</option>
           <option value="relbtc_weak">Top N fraqueza vs BTC</option>
         </select>
       </div>
       <div class="row2">
         <div class="field"><span class="field-label">Símbolo (se escopo único)</span><input type="text" name="symbol" value="BTCUSDT"></div>
-        <div class="field"><span class="field-label">Top N (se topn/relbtc)</span><input type="number" name="top_n" value="10"></div>
+        <div class="field"><span class="field-label">Quantidade (Top N, se vs BTC)</span><input type="number" name="top_n" value="10"></div>
       </div>
-      <div class="row2">
-        <div class="field"><span class="field-label">Ranks (se ranks, separados por vírgula)</span><input type="text" name="ranks" placeholder="3,6,5,12"></div>
-        <div class="field"><span class="field-label">Janela de comparação (se relbtc)</span>
-          <div style="display:flex; gap:8px;">
-            <input type="number" name="lookback_value" value="30" style="flex:1;">
-            <select name="lookback_unit" style="flex:1;">
-              <option value="days" selected>Dias</option>
-              <option value="hours">Horas</option>
-            </select>
-          </div>
+      <div class="field"><span class="field-label">Janela de comparação (se vs BTC)</span>
+        <div style="display:flex; gap:8px;">
+          <input type="number" name="lookback_value" value="30" style="flex:1;">
+          <select name="lookback_unit" style="flex:1;">
+            <option value="days" selected>Dias</option>
+            <option value="hours">Horas</option>
+          </select>
         </div>
+        <span class="field-hint">Nos modos vs BTC, testa todos os pares USDT ativos na Binance Futures e te mostra uma tela de revisão com os candidatos antes de confirmar -- pode demorar um pouco.</span>
       </div>
       <div class="field"><span class="field-label">Stop-loss por operação (% ROI sobre margem)</span><input type="number" step="0.1" name="stop_pct" value="2.5"></div>
       <button class="btn btn-long" type="submit" name="direction" value="long">▲ Long</button>

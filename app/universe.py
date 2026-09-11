@@ -1,22 +1,26 @@
 """Server-side port of backtest_lab.html's resolveSymbolUniverse --
-five scopes (single symbol, Top N by volume, specific ranks, Top N
-strength/weakness vs BTC), all sourced from Binance Futures' own public
-endpoints, called once by the operator when starting a campaign instead
-of live in the browser.
+now just two scopes (single symbol, Top N strength/weakness vs BTC),
+sourced from Binance Futures' own public endpoints, called once by the
+operator when starting a campaign instead of live in the browser.
 
-Ranked by 24h quote volume, not market cap. This used to pull
-market-cap rank from CoinGecko's key-less public API, but that endpoint
-has a low, shared rate limit -- Render's outbound IPs are pooled across
-many customers, so it kept returning 429 "Too Many Requests" even from
-this app's own light, occasional use (confirmed live, more than once).
-Volume isn't identical to market cap, but for picking a liquid basket
-of coins to actually trade in size it's arguably the more relevant
-signal anyway, and sourcing it from Binance itself removes an external
-dependency entirely -- no more cross-API symbol matching to get wrong,
-and Binance's own rate limits are far more generous.
+"Top N marketcap" and "Ranks especificos" (and the CoinGecko/volume
+ranking that backed them) were removed 2026-09-11 to match a redesign
+made independently on the standalone backtest_lab.html prototype:
+strength/weakness vs BTC is the only ranked scope now, and its
+candidate pool is every active USDT-margined perpetual on Binance
+Futures (no top-N-by-volume pre-filter) -- the operator reviews and
+hand-picks the actual campaign symbols from the ranked results before
+confirming (see operator.py's search/review step) rather than the
+resolved Top N auto-starting a campaign.
+
+Testing all ~500+ pairs (vs the previous 80-candidate cap) takes
+noticeably longer -- see render.yaml/Procfile's gunicorn --timeout,
+raised accordingly. This is deliberately a two-step flow now (search,
+then confirm) specifically so a slow search never risks timing out
+mid-campaign-creation; it only risks timing out the search itself,
+which is safe to just retry.
 """
 
-import threading
 import time
 
 import requests
@@ -27,14 +31,6 @@ STABLE_EXCLUDE = {
     "usdt", "usdc", "dai", "busd", "tusd", "fdusd", "usde", "usds",
     "pyusd", "frax", "gusd", "lusd", "usdd", "eurt", "eurs",
 }
-
-# Binance's rate limits are generous enough that this cache isn't load
-# -bearing the way the old CoinGecko one was -- it's just here to avoid
-# re-fetching and re-sorting a few hundred tickers every time the
-# operator opens the "start campaign" form.
-_RANKED_CACHE_TTL = 60  # seconds
-_ranked_cache = {}  # testnet(bool) -> {"data": [...], "ts": float}
-_ranked_lock = threading.Lock()
 
 
 def _base_url(testnet):
@@ -49,34 +45,6 @@ def fetch_binance_futures_symbols(testnet):
         s["symbol"] for s in data["symbols"]
         if s.get("contractType") == "PERPETUAL" and s.get("status") == "TRADING" and s.get("quoteAsset") == "USDT"
     }
-
-
-def _ranked_by_volume(testnet):
-    """List of {"symbol": <base asset, lowercase>, "rank": int},
-    sorted by 24h quote volume descending, USDT-margined perpetuals
-    only -- the Binance-only replacement for the old CoinGecko
-    market-cap ranking (see module docstring)."""
-    with _ranked_lock:
-        entry = _ranked_cache.get(testnet)
-        if entry and time.time() - entry["ts"] < _RANKED_CACHE_TTL:
-            return entry["data"]
-
-    valid_symbols = fetch_binance_futures_symbols(testnet)
-    resp = requests.get(f"{_base_url(testnet)}/fapi/v1/ticker/24hr", timeout=15)
-    resp.raise_for_status()
-    tickers = [t for t in resp.json() if t["symbol"] in valid_symbols]
-    tickers.sort(key=lambda t: -float(t["quoteVolume"]))
-
-    ranked = []
-    for t in tickers:
-        base = t["symbol"][:-4].lower()  # strip "USDT" -- every valid_symbols entry is USDT-quoted
-        if base in STABLE_EXCLUDE:
-            continue
-        ranked.append({"symbol": base, "rank": len(ranked) + 1})
-
-    with _ranked_lock:
-        _ranked_cache[testnet] = {"data": ranked, "ts": time.time()}
-    return ranked
 
 
 def fetch_kline_return(symbol, from_ms, to_ms, interval, testnet):
@@ -115,50 +83,53 @@ def rank_by_relative_strength_vs_btc(candidate_symbols, ref_ms, window_ms, inter
     return results
 
 
+def rank_symbol_universe(scope, params, ref_ms, testnet):
+    """Resolves and ranks candidates for the vs-BTC scopes WITHOUT
+    picking a final Top N -- returns the full ranked list (direction
+    already applied: strongest-first for "relbtc", weakest-first for
+    "relbtc_weak") so the operator can review it and hand-pick the
+    actual campaign symbols (see operator.py's search/review step).
+    Raises ValueError with a user-facing message on failure."""
+    valid_symbols = fetch_binance_futures_symbols(testnet)
+    candidates = [s for s in valid_symbols if s != "BTCUSDT" and s[:-4].lower() not in STABLE_EXCLUDE]
+
+    lookback_value = int(params.get("lookbackValue", 30))
+    lookback_unit = params.get("lookbackUnit", "days")
+    if lookback_unit == "hours":
+        window_ms = lookback_value * 3600 * 1000
+        interval = "1h"
+    else:
+        window_ms = lookback_value * 24 * 3600 * 1000
+        interval = "1d"
+
+    ranked = rank_by_relative_strength_vs_btc(candidates, ref_ms, window_ms, interval, testnet)
+    if not ranked:
+        raise ValueError("nao foi possivel calcular forca relativa vs BTC para nenhum candidato")
+    if scope == "relbtc_weak":
+        ranked = list(reversed(ranked))
+    return ranked
+
+
 def resolve_symbol_universe(scope, params, ref_ms, testnet):
     """Returns a list of {"symbol": ..., "rank": int|None}. Raises
     ValueError with a user-facing message on failure (no eligible
-    symbols, upstream API error, etc.)."""
+    symbols, upstream API error, etc.).
+
+    scope == "single": resolves immediately, no ranking involved.
+    scope in ("relbtc", "relbtc_weak"): resolves the FIRST params["topN"]
+    of the full ranking (see rank_symbol_universe) -- used only as a
+    fallback/default selection; the normal flow lets the operator
+    override this via the search/review step instead of calling this
+    directly with those scopes.
+    """
     if scope == "single":
         symbol = params["symbol"].upper()
         return [{"symbol": symbol, "rank": None}]
 
     if scope in ("relbtc", "relbtc_weak"):
-        market_list = _ranked_by_volume(testnet)
-        candidates = [f"{c['symbol'].upper()}USDT" for c in market_list if c["symbol"] != "btc"]
-        # Cap the pool before the one-network-call-per-candidate ranking
-        # below -- market_list can hand back 150-200+ eligible symbols,
-        # and at ~0.1-0.3s per candidate (klines fetch + the sleep that
-        # avoids hitting Binance's rate limit) that's well past gunicorn's
-        # request timeout. Top 80 by volume is still a wide enough pool
-        # for the relative-strength ranking to mean something.
-        candidates = candidates[:80]
+        ranked = rank_symbol_universe(scope, params, ref_ms, testnet)
         top_n = int(params.get("topN", 10))
-        lookback_value = int(params.get("lookbackValue", 30))
-        lookback_unit = params.get("lookbackUnit", "days")
-        if lookback_unit == "hours":
-            window_ms = lookback_value * 3600 * 1000
-            interval = "1h"
-        else:
-            window_ms = lookback_value * 24 * 3600 * 1000
-            interval = "1d"
-        ranked = rank_by_relative_strength_vs_btc(candidates, ref_ms, window_ms, interval, testnet)
-        if not ranked:
-            raise ValueError("nao foi possivel calcular forca relativa vs BTC para nenhum candidato")
-        is_weak = scope == "relbtc_weak"
-        top = list(reversed(ranked[-top_n:])) if is_weak else ranked[:top_n]
+        top = ranked[:top_n]
         return [{"symbol": r["symbol"], "rank": i + 1} for i, r in enumerate(top)]
 
-    market_list = _ranked_by_volume(testnet)
-    if scope == "topn":
-        selected = market_list[: int(params.get("topN", 10))]
-    elif scope == "ranks":
-        wanted_ranks = set(params.get("ranks", []))
-        selected = [c for c in market_list if c["rank"] in wanted_ranks]
-    else:
-        raise ValueError(f"escopo de universo desconhecido: {scope}")
-
-    resolved = [{"symbol": f"{c['symbol'].upper()}USDT", "rank": c["rank"]} for c in selected]
-    if not resolved:
-        raise ValueError("nenhum simbolo encontrado na Binance Futures para esse escopo")
-    return resolved
+    raise ValueError(f"escopo de universo desconhecido: {scope}")

@@ -24,14 +24,18 @@ services:
     region: frankfurt
     plan: starter
     buildCommand: "pip install -r requirements.txt"
-    # timeout 180 -- "Top N forca vs BTC" resolves its candidate universe
-    # synchronously inside the request (one network call per candidate
-    # symbol, see app/universe.py), which can run past gunicorn's 30s
-    # default and get killed mid-request ("WORKER TIMEOUT", confirmed
-    # live). Raised here instead of moving that work into the engine
-    # thread, since the operator needs the resolved symbol list back
-    # before the campaign can be created.
-    startCommand: "gunicorn wsgi:app --timeout 180"
+    # timeout 300 -- "Top N forca/fraqueza vs BTC" ranks EVERY active
+    # USDT pair on Binance Futures (~500+, no pre-filter) synchronously
+    # inside the request (one network call per candidate, see
+    # app/universe.py's rank_symbol_universe), which can run well past
+    # gunicorn's 30s default and get killed mid-request ("WORKER
+    # TIMEOUT", confirmed live at the old 80-candidate cap already).
+    # This is the "buscar candidatos" step only (renders a review
+    # screen, does not create the campaign), so a slow/timed-out search
+    # is safe to just retry -- raised here instead of moving the work
+    # into the engine thread since the operator needs the ranked list
+    # back to review before confirming.
+    startCommand: "gunicorn wsgi:app --timeout 300"
     envVars:
       - key: DATABASE_URL
         fromDatabase:

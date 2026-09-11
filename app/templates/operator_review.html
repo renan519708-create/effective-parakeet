@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Revisar universo{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <div class="panel-title">Revisar candidatos</div>
+  <p class="sub">
+    <span class="side-tag {{ 'side-long' if direction == 'long' else 'side-short' }}">{{ direction.upper() }}</span> &middot;
+    {{ 'Top N força vs BTC' if scope == 'relbtc' else 'Top N fraqueza vs BTC' }} &middot;
+    Stop: {{ stop_pct }}% &middot;
+    Janela: {{ lookback_value }} {{ 'horas' if lookback_unit == 'hours' else 'dias' }}
+  </p>
+  <p class="sub">Desmarque o que não quiser incluir, ou adicione outro símbolo manualmente abaixo. Nada é iniciado até você confirmar.</p>
+
+  <form method="post" action="{{ url_for('operator.start_campaign') }}">
+    <input type="hidden" name="step" value="confirm">
+    <input type="hidden" name="direction" value="{{ direction }}">
+    <input type="hidden" name="scope" value="{{ scope }}">
+    <input type="hidden" name="stop_pct" value="{{ stop_pct }}">
+    <input type="hidden" name="top_n" value="{{ top_n }}">
+    <input type="hidden" name="lookback_value" value="{{ lookback_value }}">
+    <input type="hidden" name="lookback_unit" value="{{ lookback_unit }}">
+
+    {% if candidates %}
+    <div class="table-wrap" style="margin-bottom:14px;"><table>
+      <thead><tr><th></th><th>Rank</th><th>Símbolo</th><th>Força vs BTC</th></tr></thead>
+      <tbody>
+      {% for c in candidates %}
+        <tr>
+          <td><input type="checkbox" name="symbols" value="{{ c.symbol }}" checked></td>
+          <td>{{ loop.index }}</td>
+          <td>{{ c.symbol }}</td>
+          <td class="{{ 'pnl-pos' if c.rel_strength >= 0 else 'pnl-neg' }}">{{ '%+.2f%%'|format(c.rel_strength) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}
+      <div class="empty-state">Nenhum candidato encontrado.</div>
+    {% endif %}
+
+    <div class="field"><span class="field-label">Adicionar símbolo manualmente (separados por vírgula)</span><input type="text" name="extra_symbols" placeholder="ETHUSDT,SOLUSDT"></div>
+
+    <button class="btn {{ 'btn-long' if direction == 'long' else 'btn-short' }}" type="submit">Confirmar e iniciar campanha</button>
+    <a class="btn" href="{{ url_for('operator.dashboard') }}">Cancelar</a>
+  </form>
+</div>
+{% endblock %}
