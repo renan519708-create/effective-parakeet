@@ -21,6 +21,7 @@ mid-campaign-creation; it only risks timing out the search itself,
 which is safe to just retry.
 """
 
+import concurrent.futures
 import time
 
 import requests
@@ -31,6 +32,14 @@ STABLE_EXCLUDE = {
     "usdt", "usdc", "dai", "busd", "tusd", "fdusd", "usde", "usds",
     "pyusd", "frax", "gusd", "lusd", "usdd", "eurt", "eurs",
 }
+
+# Ranking ~525 candidates one at a time (confirmed live: ~130-260s) is
+# too close to even a generous gunicorn --timeout for comfort. Fetching
+# candidates concurrently (same ThreadPoolExecutor pattern as
+# app/engine.py's per-account tick) cuts that to ~15-30s -- each worker
+# still sleeps between its OWN requests (see _rank_one), so this isn't
+# "no more throttling", just spread across more workers than one.
+RANK_MAX_WORKERS = 15
 
 
 def _base_url(testnet):
@@ -69,16 +78,24 @@ def rank_by_relative_strength_vs_btc(candidate_symbols, ref_ms, window_ms, inter
     efficient choice for longer, day-scale windows."""
     from_ms = ref_ms - window_ms
     btc_return = fetch_kline_return("BTCUSDT", from_ms, ref_ms, interval, testnet)
-    results = []
-    for symbol in candidate_symbols:
+
+    def _rank_one(symbol):
         if symbol == "BTCUSDT":
-            continue
+            return None
         try:
             ret = fetch_kline_return(symbol, from_ms, ref_ms, interval, testnet)
-            results.append({"symbol": symbol, "rel_strength": (ret - btc_return) * 100})
+            return {"symbol": symbol, "rel_strength": (ret - btc_return) * 100}
         except (requests.RequestException, ValueError):
-            pass
-        time.sleep(0.1)
+            return None
+        finally:
+            time.sleep(0.1)  # per-worker throttle -- see RANK_MAX_WORKERS
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=RANK_MAX_WORKERS) as pool:
+        for r in pool.map(_rank_one, candidate_symbols):
+            if r is not None:
+                results.append(r)
+
     results.sort(key=lambda r: -r["rel_strength"])
     return results
 
