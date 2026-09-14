@@ -22,9 +22,10 @@
   <div class="panel-title">Minhas configurações</div>
   <form method="post" action="{{ url_for('follower.save_settings') }}">
     <div class="row2">
-      <div class="field"><span class="field-label">% de risco por campanha</span><input type="number" step="0.1" name="risk_pct" value="{{ settings.risk_pct }}"></div>
+      <div class="field"><span class="field-label">Valor fixo por posição (USD, margem)</span><input type="number" step="1" min="1" name="trade_size_usd" value="{{ settings.trade_size_usd }}"></div>
       <div class="field"><span class="field-label">Alavancagem (x)</span><input type="number" name="leverage" value="{{ settings.leverage }}" min="1" max="125"></div>
     </div>
+    <p class="sub">Cada símbolo de uma campanha abre com esse valor de margem -- uma campanha de 10 símbolos usa 10× esse valor no total, independente do seu saldo.</p>
     <div class="toggle-row">
       <span class="field-label">Drawdown máximo da minha carteira</span>
       <input type="checkbox" name="max_drawdown_enabled" {% if settings.max_drawdown_enabled %}checked{% endif %}>

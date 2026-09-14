@@ -66,6 +66,14 @@ class FollowerSettings(db.Model):
     __tablename__ = "follower_settings"
 
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    # Fixed USD margin per position when a campaign opens for this
+    # account -- replaced risk_pct (a %-of-available-balance-divided-
+    # by-symbol-count scheme, confusing and hard to predict, especially
+    # once the Auto-bot has its own margin locked on the same account)
+    # 2026-09-14. risk_pct stays in the model/table (still present in
+    # any existing production row, no migration to drop it) but is no
+    # longer read anywhere.
+    trade_size_usd = db.Column(db.Float, nullable=False, default=10.0)
     risk_pct = db.Column(db.Float, nullable=False, default=10.0)
     leverage = db.Column(db.Integer, nullable=False, default=1)
     max_drawdown_enabled = db.Column(db.Boolean, nullable=False, default=True)

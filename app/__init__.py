@@ -20,6 +20,7 @@ def _patch_schema():
     statements = [
         "ALTER TABLE campaign_symbols ADD COLUMN IF NOT EXISTS entry_price DOUBLE PRECISION",
         "ALTER TABLE campaign_symbols ADD COLUMN IF NOT EXISTS exit_price DOUBLE PRECISION",
+        "ALTER TABLE follower_settings ADD COLUMN IF NOT EXISTS trade_size_usd DOUBLE PRECISION DEFAULT 10.0",
     ]
     for stmt in statements:
         db.session.execute(text(stmt))

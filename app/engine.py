@@ -81,12 +81,6 @@ def is_drawdown_triggered(peak_value, current_value, max_drawdown_pct):
     return drawdown_pct >= max_drawdown_pct
 
 
-def compute_initial_slice(balance, risk_pct, num_symbols):
-    if num_symbols <= 0 or balance <= 0:
-        return 0.0
-    return (balance * (risk_pct / 100)) / num_symbols
-
-
 # ---------------------------------------------------------------------------
 # Imperative engine -- DB + real Binance orders.
 # ---------------------------------------------------------------------------
@@ -338,11 +332,17 @@ def _process_follower(app, campaign, user, prices):
         state.status = "opening"
         db.session.commit()
         try:
-            balance, err = broker.get_account_balance()
-            if err:
-                _log_order(user.id, "-", "-", None, "open", None, "failed", f"saldo indisponivel: {err}")
-                return
-            slice_usd = compute_initial_slice(balance, settings.risk_pct, len(campaign.symbols))
+            # Fixed USD margin per position, same predictable-per-trade
+            # model the Auto-bot already uses -- confirmed live 2026-09-14:
+            # the old "% of available balance / number of symbols" scheme
+            # produced confusingly tiny, hard-to-predict sizes (an 80%
+            # risk_pct still landed on ~$1/position once split across a
+            # 10-symbol campaign, and the "available balance" half of the
+            # formula shrinks further whenever the Auto-bot has its own
+            # margin locked on the same account). trade_size_usd is set
+            # once in "Minha conta" and means exactly what it says,
+            # independent of campaign size or what else is running.
+            slice_usd = settings.trade_size_usd
             side = "BUY" if campaign.direction == "long" else "SELL"
             for cs in campaign.symbols:
                 symbol = cs.symbol

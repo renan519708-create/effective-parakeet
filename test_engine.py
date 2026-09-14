@@ -4,7 +4,7 @@ network, no Flask app context needed for any of these."""
 import unittest
 
 from app.engine import (
-    compute_initial_slice, is_drawdown_triggered, is_stop_triggered,
+    is_drawdown_triggered, is_stop_triggered,
     pick_redirect_leader, price_roi_pct,
 )
 
@@ -77,20 +77,6 @@ class TestIsDrawdownTriggered(unittest.TestCase):
     def test_new_peak_resets_the_baseline(self):
         # Portfolio above its own peak is never a drawdown, regardless of pct.
         self.assertFalse(is_drawdown_triggered(1000, 1200, 20))
-
-
-class TestComputeInitialSlice(unittest.TestCase):
-    def test_splits_evenly_across_symbols(self):
-        self.assertAlmostEqual(compute_initial_slice(1000, 10, 4), 25.0)
-
-    def test_zero_symbols_returns_zero(self):
-        self.assertEqual(compute_initial_slice(1000, 10, 0), 0.0)
-
-    def test_zero_balance_returns_zero(self):
-        self.assertEqual(compute_initial_slice(0, 10, 4), 0.0)
-
-    def test_single_symbol_takes_the_whole_risk_slice(self):
-        self.assertAlmostEqual(compute_initial_slice(500, 20, 1), 100.0)
 
 
 if __name__ == "__main__":
