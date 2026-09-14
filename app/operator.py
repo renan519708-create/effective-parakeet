@@ -11,7 +11,7 @@ from flask_login import current_user, login_required
 
 from app.engine import campaign_result_pct, fetch_prices, price_roi_pct
 from app.extensions import db
-from app.models import Campaign, CampaignSymbol, FollowerAllocation, FollowerCampaignState, Position, User
+from app.models import Campaign, CampaignSymbol, FollowerAllocation, FollowerCampaignState, OrderLog, Position, User
 from app.universe import rank_symbol_universe, resolve_symbol_universe
 
 operator_bp = Blueprint("operator", __name__, url_prefix="/operador")
@@ -84,6 +84,35 @@ def dashboard():
         if changed:
             db.session.commit()
 
+    # "stopping" means the engine is trying, every tick, to place a real
+    # close order for each open Position -- if one keeps failing (bad
+    # API key, symbol delisted, exchange rejection, etc.) the campaign
+    # can sit in "stopping" forever with no visible reason on this page,
+    # which is exactly what made a stuck close look like a silent error
+    # (confirmed live 2026-09-13: the button below used to still say
+    # "Encerrar operacoes" even while already stopping, and clicking it
+    # again just flashed "Nenhuma campanha ativa" -- true, but useless,
+    # since the actual problem is the engine's own retry failing, not
+    # the campaign not being marked as stopping). Surface the most
+    # recent failed close attempt per open position so the operator
+    # doesn't need Render's worker logs just to see why.
+    stuck_reasons = []
+    if campaign and campaign.status == "stopping":
+        open_positions = Position.query.filter_by(campaign_id=campaign.id, status="open").all()
+        for p in open_positions:
+            last_fail = (
+                OrderLog.query.filter_by(user_id=p.user_id, symbol=p.symbol, order_type="close", status="failed")
+                .order_by(OrderLog.created_at.desc())
+                .first()
+            )
+            user = User.query.get(p.user_id)
+            stuck_reasons.append({
+                "symbol": p.symbol,
+                "email": user.email if user else f"user#{p.user_id}",
+                "error": last_fail.error_message if last_fail else None,
+                "when": last_fail.created_at if last_fail else None,
+            })
+
     # Same "only count symbols with real trade evidence" rule for the
     # historical Resultado column -- CampaignSymbol.entry_price is
     # always set (a synthetic reference captured at campaign-start,
@@ -110,6 +139,7 @@ def dashboard():
         is_owner=current_user.role == "owner",
         live=live,
         results=results,
+        stuck_reasons=stuck_reasons,
     )
 
 
