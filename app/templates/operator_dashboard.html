@@ -21,7 +21,7 @@
       Stop: {{ campaign.stop_pct }}%
     </p>
     <div class="table-wrap" style="margin-bottom:14px;"><table>
-      <thead><tr><th>Símbolo</th><th>Rank</th><th>Entrada</th><th>Agora</th><th>%</th></tr></thead>
+      <thead><tr><th>Símbolo</th><th>Rank</th><th>Entrada</th><th>Agora</th><th>% (ROI {{ current_user.settings.leverage if current_user.settings else 1 }}x, sua conta)</th></tr></thead>
       <tbody>
       {% for s in campaign.symbols %}
         {% set l = live.get(s.symbol, {}) %}

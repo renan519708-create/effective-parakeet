@@ -79,7 +79,19 @@ def dashboard():
                 # is accurate too, not just this live view.
                 s.entry_price = real_entry
                 changed = True
-            pct = price_roi_pct(campaign.direction, real_entry, current, 1) if (real_entry and current) else None
+            # Leveraged against the VIEWING operator's own account, not a
+            # flat 1x -- confirmed live 2026-09-14: showing the raw 1x
+            # price move here read as "wrong" next to Binance's own
+            # position view, which always shows ROI already scaled by
+            # that account's real leverage (e.g. 6% raw read as 60% on
+            # Binance at 10x). This is a live monitoring view for the
+            # operator's own account specifically, unlike
+            # campaign_result_pct's finished-campaign history figure
+            # (kept unleveraged/1x there on purpose -- a %-history
+            # figure has to stay comparable across campaigns regardless
+            # of whatever leverage was configured at the time).
+            leverage = (current_user.settings.leverage if current_user.settings else None) or 1
+            pct = price_roi_pct(campaign.direction, real_entry, current, leverage) if (real_entry and current) else None
             live[s.symbol] = {"entry": real_entry, "current": current, "pct": pct}
         if changed:
             db.session.commit()
