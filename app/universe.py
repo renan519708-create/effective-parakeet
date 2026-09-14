@@ -57,17 +57,53 @@ def fetch_binance_futures_symbols(testnet):
 
 
 def get_top_volume_symbols(testnet, top_n=50):
-    """Top-N USDT perpetuals by 24h quote volume -- the Auto-bot's Kairi
-    universe (ported from gg-shot-monitor/symbols.py's
-    get_top_volume_symbols, dropping its manual TradingView-watchlist
-    merge: that list was specific to the user's own chart setup, not
-    part of the strategy's validated edge)."""
+    """Top-N USDT perpetuals by 24h quote volume (ported from
+    gg-shot-monitor/symbols.py's get_top_volume_symbols)."""
     valid = fetch_binance_futures_symbols(testnet)
     resp = requests.get(f"{_base_url(testnet)}/fapi/v1/ticker/24hr", timeout=15)
     resp.raise_for_status()
     rows = [d for d in resp.json() if d["symbol"] in valid]
     rows.sort(key=lambda d: float(d["quoteVolume"]), reverse=True)
     return [d["symbol"] for d in rows[:top_n]]
+
+
+# Same manual watchlist gg-shot-monitor's symbols.py merges into its own
+# Kairi universe (WATCHLIST_TICKERS there). Ported here too -- an
+# earlier version of the Auto-bot deliberately dropped this, reasoning
+# it was "specific to the user's chart setup, not part of the
+# strategy's validated edge". That was wrong: every Kairi backtest this
+# strategy was validated against (90/60/30-day, 2-year, out-of-sample,
+# the compounding simulation in the report sent to the socio) called
+# resolve_symbol_list(top_n=50), which INCLUDES this merge -- confirmed
+# live 2026-09-14 when the Auto-bot missed real signals gg-shot-monitor's
+# own live Kairi feed caught on watchlist-only tickers (VVVUSDT, 4USDT,
+# UAIUSDT) that weren't in the top-50-by-volume alone. Keeping this in
+# sync with gg-shot-monitor/symbols.py's WATCHLIST_TICKERS is what keeps
+# the Auto-bot's real universe matching what was actually backtested.
+KAIRI_WATCHLIST_TICKERS = [
+    "BTC", "ETH", "XRP", "LINK", "DOT", "AVAX", "BNB", "LTC", "ADA", "SOL",
+    "ZEC", "PUMP", "BANK", "CL", "TAIKO", "ONT", "VIRTUAL", "VELVET", "UAI",
+    "NEAR", "RIF", "ENA", "KSM", "DEXE", "PENGU", "4", "CLO", "VVV",
+]
+
+
+def resolve_kairi_universe(testnet, top_n=50):
+    """The Auto-bot's actual Kairi universe: watchlist tickers (that
+    are still valid/tradeable) + top-N by volume, deduplicated,
+    watchlist first -- same shape as gg-shot-monitor/symbols.py's
+    resolve_symbol_list, so the Auto-bot scans exactly what the
+    validated backtests scanned. One exchangeInfo fetch shared by both
+    parts (not a separate call per part)."""
+    valid = fetch_binance_futures_symbols(testnet)
+    watchlist_symbols = [f"{t}USDT" for t in KAIRI_WATCHLIST_TICKERS if f"{t}USDT" in valid]
+
+    resp = requests.get(f"{_base_url(testnet)}/fapi/v1/ticker/24hr", timeout=15)
+    resp.raise_for_status()
+    rows = [d for d in resp.json() if d["symbol"] in valid]
+    rows.sort(key=lambda d: float(d["quoteVolume"]), reverse=True)
+    top_symbols = [d["symbol"] for d in rows[:top_n]]
+
+    return list(dict.fromkeys(watchlist_symbols + top_symbols))
 
 
 def fetch_kline_return(symbol, from_ms, to_ms, interval, testnet):

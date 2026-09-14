@@ -24,7 +24,7 @@ from app.kairi import compute_ema_series, compute_kairi_series
 from app.kairi_outcome import evaluate_kairi_outcome
 from app.klines import get_klines, get_latest_candle
 from app.models import AutoBotCredential, AutoBotPosition, AutoBotSettings, AutoBotSymbolState, User
-from app.universe import get_top_volume_symbols
+from app.universe import resolve_kairi_universe
 
 # Validated live config, ported as-is from gg-shot-monitor's config.json
 # (see gg-shot-monitor-live-trading-plan.md: 2-year backtest, out-of-
@@ -294,7 +294,7 @@ def run_tick(app):
         open_symbols = {p.symbol for p in AutoBotPosition.query.filter_by(status="open").all()}
         if not any_enabled and not open_symbols:
             return
-        universe = set(get_top_volume_symbols(testnet, top_n=UNIVERSE_TOP_N)) if any_enabled else set()
+        universe = set(resolve_kairi_universe(testnet, top_n=UNIVERSE_TOP_N)) if any_enabled else set()
         symbols = universe | open_symbols
 
     signals = {}
