@@ -166,6 +166,87 @@ class FollowerCampaignState(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
+class AutoBotCredential(db.Model):
+    """Binance key dedicated to the Auto-bot -- deliberately separate
+    from ApiCredential (the campaign/follower key). A testnet key
+    can't authenticate against mainnet and vice-versa, so sharing one
+    credential would force the campaign feature and the Auto-bot to
+    always sit in the same environment; keeping them apart lets the
+    Auto-bot go to mainnet on its own schedule (see AUTOBOT_TESTNET in
+    app/config.py)."""
+    __tablename__ = "autobot_credentials"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True, nullable=False)
+    encrypted_api_key = db.Column(db.Text, nullable=False)
+    encrypted_api_secret = db.Column(db.Text, nullable=False)
+    is_valid = db.Column(db.Boolean, default=True, nullable=False)
+    last_validated_at = db.Column(db.DateTime(timezone=True), default=_utcnow)
+
+    user = db.relationship("User")
+
+
+class AutoBotSettings(db.Model):
+    """One row per user. capital_usd is the TOTAL the user set aside
+    for the Auto-bot (not per-trade) -- each entry sizes at
+    capital_usd / NUM_SLOTS (see app/autobot_engine.py), non-compounding
+    (recomputed from this fixed setting, never from the running
+    balance)."""
+    __tablename__ = "autobot_settings"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    enabled = db.Column(db.Boolean, nullable=False, default=False)
+    capital_usd = db.Column(db.Float, nullable=False, default=100.0)
+    leverage = db.Column(db.Integer, nullable=False, default=6)
+    updated_at = db.Column(db.DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    user = db.relationship("User")
+
+
+class AutoBotSymbolState(db.Model):
+    """GLOBAL, one row per symbol -- the Kairi zone crossing is a
+    market fact, identical for every user, so it's tracked once here
+    rather than duplicated per account. Per-account decisions (open a
+    trade or not) are made separately in autobot_engine using this
+    shared signal."""
+    __tablename__ = "autobot_symbol_state"
+
+    symbol = db.Column(db.String(20), primary_key=True)
+    # "oversold" | "overbought" | "neutral"
+    zone = db.Column(db.String(12), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class AutoBotPosition(db.Model):
+    """One real Auto-bot trade for one user. status follows
+    kairi_outcome.py's own vocabulary directly ("open" then exactly one
+    of "green"/"red"/"stopped"/"liquidated") -- no generic "closed"
+    state, so the outcome is visible without a second field."""
+    __tablename__ = "autobot_positions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    symbol = db.Column(db.String(20), nullable=False)
+    direction = db.Column(db.String(5), nullable=False)  # "LONG" | "SHORT"
+    entry_price = db.Column(db.Float, nullable=False)
+    # epoch ms of the entry candle's close_time -- doubles as the
+    # dedupe key so the same fresh crossing never opens twice for one
+    # user (see autobot_engine.run_tick).
+    entry_time = db.Column(db.BigInteger, nullable=False)
+    opened_at = db.Column(db.DateTime(timezone=True), default=_utcnow)
+    # "open" | "green" | "red" | "stopped" | "liquidated"
+    status = db.Column(db.String(12), nullable=False, default="open")
+    close_price = db.Column(db.Float, nullable=True)
+    close_time = db.Column(db.BigInteger, nullable=True)
+    closed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    result_pct = db.Column(db.Float, nullable=True)
+    max_drawdown_pct = db.Column(db.Float, nullable=False, default=0.0)
+    allocated_usd = db.Column(db.Float, nullable=False)
+    realized_pnl_usd = db.Column(db.Float, nullable=True)
+
+    user = db.relationship("User")
+
+
 class OrderLog(db.Model):
     __tablename__ = "order_log"
 

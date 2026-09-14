@@ -56,6 +56,20 @@ def fetch_binance_futures_symbols(testnet):
     }
 
 
+def get_top_volume_symbols(testnet, top_n=50):
+    """Top-N USDT perpetuals by 24h quote volume -- the Auto-bot's Kairi
+    universe (ported from gg-shot-monitor/symbols.py's
+    get_top_volume_symbols, dropping its manual TradingView-watchlist
+    merge: that list was specific to the user's own chart setup, not
+    part of the strategy's validated edge)."""
+    valid = fetch_binance_futures_symbols(testnet)
+    resp = requests.get(f"{_base_url(testnet)}/fapi/v1/ticker/24hr", timeout=15)
+    resp.raise_for_status()
+    rows = [d for d in resp.json() if d["symbol"] in valid]
+    rows.sort(key=lambda d: float(d["quoteVolume"]), reverse=True)
+    return [d["symbol"] for d in rows[:top_n]]
+
+
 def fetch_kline_return(symbol, from_ms, to_ms, interval, testnet):
     resp = requests.get(f"{_base_url(testnet)}/fapi/v1/klines", params={
         "symbol": symbol, "interval": interval, "startTime": from_ms, "endTime": to_ms, "limit": 1000,

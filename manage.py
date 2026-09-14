@@ -57,10 +57,20 @@ def runserver():
 def run_engine():
     """The production engine process (Procfile's `worker` line) --
     always exactly one of these regardless of how many web workers
-    gunicorn runs. See app/engine.py's run_forever docstring."""
+    gunicorn runs. See app/engine.py's run_forever docstring.
+
+    Runs BOTH engines in this one process: the campaign engine
+    (app/engine.py) in its own background thread -- same helper
+    runserver() already uses for local dev -- and the Auto-bot engine
+    (app/autobot_engine.py) as the main blocking loop. No separate
+    Render worker needed for the Auto-bot; a real stop-loss/EMA check
+    for either strategy still only ever runs in this one process,
+    regardless of how many web dynos exist."""
     app = create_app(start_engine=False)
-    from app.engine import run_forever
-    run_forever(app)
+    from app.engine import start_background_engine
+    from app.autobot_engine import run_forever as autobot_run_forever
+    start_background_engine(app)
+    autobot_run_forever(app)
 
 
 def main():

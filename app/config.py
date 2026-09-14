@@ -34,6 +34,22 @@ class Config:
 
     ENGINE_TICK_SECONDS = float(os.environ.get("ENGINE_TICK_SECONDS", "5"))
 
+    # Auto-bot (Kairi) has its OWN testnet switch, deliberately separate
+    # from BINANCE_TESTNET above -- the campaign engine and the Auto-bot
+    # can go to mainnet on different schedules this way (a testnet key
+    # can't authenticate against mainnet or vice-versa, so this also
+    # means AutoBotCredential is validated against THIS flag, never
+    # BINANCE_TESTNET). Defaults to testnet, same safety-first default
+    # as the rest of the app.
+    AUTOBOT_TESTNET = os.environ.get("AUTOBOT_TESTNET", "true").lower() == "true"
+
+    # Kairi trades on 1h candles and exits on an EMA touch or a hard
+    # stop -- it doesn't need the campaign engine's 5s cadence (that
+    # exists for a tight campaign stop_pct). 300s matches
+    # gg-shot-monitor's own poll_interval_seconds for the same strategy,
+    # and is far lighter on Binance's rate limits across ~50 symbols.
+    AUTOBOT_TICK_SECONDS = float(os.environ.get("AUTOBOT_TICK_SECONDS", "300"))
+
     # How many follower accounts the engine processes at once (real
     # Binance calls are I/O-bound, so threads give real concurrency
     # here) -- same idea as gg-shot-monitor's FETCH_WORKERS.

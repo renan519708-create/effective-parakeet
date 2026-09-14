@@ -47,6 +47,13 @@ services:
         sync: false
       - key: BINANCE_TESTNET
         value: "true"
+      # Auto-bot's OWN testnet switch, separate from BINANCE_TESTNET
+      # above -- lets the Auto-bot (Kairi) go to mainnet on its own
+      # schedule without also flipping the campaign feature. Change
+      # this by hand in the dashboard when ready to go live; a mainnet
+      # key only works once this is "false" (see app/config.py).
+      - key: AUTOBOT_TESTNET
+        value: "true"
 
   # Background Worker, NOT a web service: no HTTP traffic means nothing
   # to idle when quiet, so this is the piece that must stay always-on
@@ -73,4 +80,11 @@ services:
       - key: ENCRYPTION_KEY
         sync: false
       - key: BINANCE_TESTNET
+        value: "true"
+      # Auto-bot's OWN testnet switch, separate from BINANCE_TESTNET
+      # above -- lets the Auto-bot (Kairi) go to mainnet on its own
+      # schedule without also flipping the campaign feature. Change
+      # this by hand in the dashboard when ready to go live; a mainnet
+      # key only works once this is "false" (see app/config.py).
+      - key: AUTOBOT_TESTNET
         value: "true"

@@ -50,11 +50,13 @@ def create_app(config_class=Config, start_engine=True):
     from app.operator import operator_bp
     from app.follower import follower_bp
     from app.results import results_bp
+    from app.autobot import autobot_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(operator_bp)
     app.register_blueprint(follower_bp)
     app.register_blueprint(results_bp)
+    app.register_blueprint(autobot_bp)
 
     with app.app_context():
         db.create_all()
@@ -62,6 +64,8 @@ def create_app(config_class=Config, start_engine=True):
 
     if start_engine:
         from app.engine import start_background_engine
+        from app.autobot_engine import start_background_engine as start_autobot_engine
         start_background_engine(app)
+        start_autobot_engine(app)
 
     return app
