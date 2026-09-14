@@ -144,7 +144,21 @@ def _close_position(broker, position, fallback_price, reason, user_id, leverage,
         return False, None
     qty = abs(pos_amt)
     if qty <= 0:
-        return True, 0.0  # already flat on the exchange, nothing to do
+        # Already flat on the exchange -- nothing to send, but this Position
+        # row still needs to be marked closed, or it sits at status="open"
+        # forever and the campaign can never reach "stopped" (confirmed
+        # live: duplicate Position rows for the same real, already-merged
+        # exchange position -- see the Case A race-condition fix below --
+        # left 9 of 10 rows stuck exactly like this). No real fill to
+        # report, so this records a flat 0.0 result rather than guessing;
+        # the actual $ outcome is already captured by whichever row's real
+        # close order did the work.
+        position.status = "closed"
+        position.close_price = fallback_price
+        position.closed_at = db.func.now()
+        position.close_reason = reason
+        position.realized_pnl_usd = 0.0
+        return True, 0.0
 
     order, err = broker.place_market_order(position.symbol, side, qty, reduce_only=True)
     if err:
@@ -299,6 +313,20 @@ def _process_follower(app, campaign, user, prices):
     state = _get_or_create_state(campaign.id, user.id)
     if state.status == "inactive":
         return  # already drawdown-halted or manually stopped for this campaign
+    if state.status == "opening":
+        # Another tick is still in the middle of placing this account's
+        # initial real orders (started less than ENGINE_TICK_SECONDS ago
+        # and hasn't finished/committed yet) -- do NOT start a second
+        # attempt. Placing the initial order involves several sequential
+        # real Binance calls (balance, margin, leverage, size, order,
+        # entry price) that can easily take longer than the 5s tick on
+        # mainnet; without this guard, every tick that ran before the
+        # first one committed saw "no allocations yet" and placed its own
+        # duplicate real order (confirmed live: 10 real BTCUSDT orders for
+        # one campaign start). The "opening" flag below is committed
+        # immediately, on its own, specifically so the NEXT tick sees it
+        # even while this one is still in flight.
+        return
 
     allocations = FollowerAllocation.query.filter_by(campaign_id=campaign.id, user_id=user.id).all()
     by_symbol = {a.symbol: a for a in allocations}
@@ -307,51 +335,61 @@ def _process_follower(app, campaign, user, prices):
     if not allocations:
         if not settings.following_enabled:
             return
-        balance, err = broker.get_account_balance()
-        if err:
-            _log_order(user.id, "-", "-", None, "open", None, "failed", f"saldo indisponivel: {err}")
-            return
-        slice_usd = compute_initial_slice(balance, settings.risk_pct, len(campaign.symbols))
-        side = "BUY" if campaign.direction == "long" else "SELL"
-        for cs in campaign.symbols:
-            symbol = cs.symbol
-            price = prices.get(symbol)
-            allocation = FollowerAllocation(campaign_id=campaign.id, user_id=user.id, symbol=symbol, allocated_usd=0.0, state="inactive")
-            db.session.add(allocation)
-            if price is None or slice_usd <= 0:
-                continue
-            broker.set_margin_type(symbol, "ISOLATED")
-            _, lev_err = broker.set_leverage(symbol, settings.leverage)
-            if lev_err:
-                _log_order(user.id, symbol, side, None, "open", None, "failed", f"leverage: {lev_err}")
-                continue
-            qty, size_err = broker.size_order_quantity(symbol, slice_usd, price)
-            if size_err:
-                _log_order(user.id, symbol, side, None, "open", None, "failed", str(size_err))
-                continue
-            order, order_err = broker.place_market_order(symbol, side, qty)
-            if order_err:
-                _log_order(user.id, symbol, side, qty, "open", None, "failed", str(order_err))
-                continue
-            # Prefer the exchange's own recorded position entry price over
-            # this order's own avgPrice -- if the account already had a
-            # leftover real position in this symbol (e.g. from an earlier
-            # campaign ended via the "Reiniciar" escape hatch, which never
-            # closes real positions), Binance blends this fill into that
-            # position server-side and the order's own avgPrice reflects
-            # only the new fill, not the blended result (confirmed live:
-            # stored entry_price disagreed with Binance's own Entry Price
-            # column by a real, non-rounding amount). Same reasoning
-            # get_position_entry_price already exists for below (Case C's
-            # redirect-to-leader blend) -- this was just the one spot that
-            # still trusted the order response alone.
-            real_entry, entry_err = broker.get_position_entry_price(symbol)
-            entry_price = real_entry if (not entry_err and real_entry) else float(order.get("avgPrice") or price)
-            db.session.add(Position(campaign_id=campaign.id, user_id=user.id, symbol=symbol, side=campaign.direction, entry_price=entry_price, status="open"))
-            allocation.allocated_usd = slice_usd
-            allocation.state = "active"
-            _log_order(user.id, symbol, side, qty, "open", order.get("orderId"), "filled")
-        state.peak_portfolio_usd = sum(a.allocated_usd for a in by_symbol.values()) or state.peak_portfolio_usd
+        state.status = "opening"
+        db.session.commit()
+        try:
+            balance, err = broker.get_account_balance()
+            if err:
+                _log_order(user.id, "-", "-", None, "open", None, "failed", f"saldo indisponivel: {err}")
+                return
+            slice_usd = compute_initial_slice(balance, settings.risk_pct, len(campaign.symbols))
+            side = "BUY" if campaign.direction == "long" else "SELL"
+            for cs in campaign.symbols:
+                symbol = cs.symbol
+                price = prices.get(symbol)
+                allocation = FollowerAllocation(campaign_id=campaign.id, user_id=user.id, symbol=symbol, allocated_usd=0.0, state="inactive")
+                db.session.add(allocation)
+                if price is None or slice_usd <= 0:
+                    continue
+                broker.set_margin_type(symbol, "ISOLATED")
+                _, lev_err = broker.set_leverage(symbol, settings.leverage)
+                if lev_err:
+                    _log_order(user.id, symbol, side, None, "open", None, "failed", f"leverage: {lev_err}")
+                    continue
+                qty, size_err = broker.size_order_quantity(symbol, slice_usd, price)
+                if size_err:
+                    _log_order(user.id, symbol, side, None, "open", None, "failed", str(size_err))
+                    continue
+                order, order_err = broker.place_market_order(symbol, side, qty)
+                if order_err:
+                    _log_order(user.id, symbol, side, qty, "open", None, "failed", str(order_err))
+                    continue
+                # Prefer the exchange's own recorded position entry price over
+                # this order's own avgPrice -- if the account already had a
+                # leftover real position in this symbol (e.g. from an earlier
+                # campaign ended via the "Reiniciar" escape hatch, which never
+                # closes real positions), Binance blends this fill into that
+                # position server-side and the order's own avgPrice reflects
+                # only the new fill, not the blended result (confirmed live:
+                # stored entry_price disagreed with Binance's own Entry Price
+                # column by a real, non-rounding amount). Same reasoning
+                # get_position_entry_price already exists for below (Case C's
+                # redirect-to-leader blend) -- this was just the one spot that
+                # still trusted the order response alone.
+                real_entry, entry_err = broker.get_position_entry_price(symbol)
+                entry_price = real_entry if (not entry_err and real_entry) else float(order.get("avgPrice") or price)
+                db.session.add(Position(campaign_id=campaign.id, user_id=user.id, symbol=symbol, side=campaign.direction, entry_price=entry_price, status="open"))
+                allocation.allocated_usd = slice_usd
+                allocation.state = "active"
+                _log_order(user.id, symbol, side, qty, "open", order.get("orderId"), "filled")
+            state.peak_portfolio_usd = sum(a.allocated_usd for a in by_symbol.values()) or state.peak_portfolio_usd
+        finally:
+            # Always release the "opening" lock, success or failure --
+            # committed on its own here (not left for the caller's final
+            # commit) so a later exception's rollback can never leave this
+            # account wedged in "opening" forever.
+            state.status = "active"
+            db.session.commit()
         return
 
     # -- Case B: follower switched off following mid-campaign -> close everything
