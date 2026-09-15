@@ -16,7 +16,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from app.binance_broker import BinanceBroker
+from app.binance_broker import BinanceBroker, parse_avg_price
 from app.crypto import decrypt_secret
 from app.engine import _log_order, price_roi_pct
 from app.extensions import db
@@ -90,7 +90,19 @@ def _place_live_entry(broker, symbol, direction, margin_usd, price, leverage, us
         _log_order(user_id, symbol, side, qty, "open", None, "failed", str(err))
         return None, None
     _log_order(user_id, symbol, side, qty, "open", order.get("orderId"), "filled")
-    return float(order.get("avgPrice") or price), qty
+    # Prefer the REAL position's own reported entry price over the
+    # order response's own avgPrice -- confirmed live 2026-09-15
+    # (reported as a wrong/sign-flipped result_pct on ARB and another
+    # symbol): a market order's immediate synchronous response can
+    # report avgPrice before the fill is fully confirmed/settled,
+    # especially on thinner-liquidity symbols, so it doesn't always
+    # match what Binance's own position endpoint later shows as the
+    # true fill. Same fix already applied to the campaign engine's
+    # Case A (app/engine.py) -- this brings Auto-bot's own entry in
+    # line with it.
+    real_entry, entry_err = broker.get_position_entry_price(symbol)
+    entry_price = real_entry if (not entry_err and real_entry) else (parse_avg_price(order) or price)
+    return entry_price, qty
 
 
 def _place_live_exit(broker, symbol, user_id):
@@ -118,7 +130,7 @@ def _place_live_exit(broker, symbol, user_id):
         _log_order(user_id, symbol, side, qty, "close", None, "failed", err)
         return None, False
     _log_order(user_id, symbol, side, qty, "close", order.get("orderId"), "filled")
-    return float(order.get("avgPrice") or 0) or None, True
+    return parse_avg_price(order), True
 
 
 def _stops_today(user_id, now_ms, tz_offset_hours=-3):

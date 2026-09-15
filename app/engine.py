@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from app.binance_broker import BinanceBroker, TESTNET_BASE_URL, MAINNET_BASE_URL
+from app.binance_broker import BinanceBroker, TESTNET_BASE_URL, MAINNET_BASE_URL, parse_avg_price
 from app.crypto import decrypt_secret
 from app.extensions import db
 from app.models import (
@@ -163,7 +163,7 @@ def _close_position(broker, position, fallback_price, reason, user_id, leverage,
         _log_order(user_id, position.symbol, side, qty, "close", None, "failed", str(err))
         return False, None
 
-    exit_price = float(order.get("avgPrice") or fallback_price)
+    exit_price = parse_avg_price(order) or fallback_price
     _log_order(user_id, position.symbol, side, qty, "close", order.get("orderId"), "filled")
     position.status = "closed"
     position.close_price = exit_price
@@ -506,7 +506,7 @@ def _process_follower(app, campaign, user, prices):
                 # redirect-to-leader blend) -- this was just the one spot that
                 # still trusted the order response alone.
                 real_entry, entry_err = broker.get_position_entry_price(symbol)
-                entry_price = real_entry if (not entry_err and real_entry) else float(order.get("avgPrice") or price)
+                entry_price = real_entry if (not entry_err and real_entry) else (parse_avg_price(order) or price)
                 db.session.add(Position(campaign_id=campaign.id, user_id=user.id, symbol=symbol, side=campaign.direction, entry_price=entry_price, status="open"))
                 allocation.allocated_usd = slice_usd
                 allocation.state = "active"

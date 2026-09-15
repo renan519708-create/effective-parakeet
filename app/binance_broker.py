@@ -59,6 +59,27 @@ def get_exchange_info(base_url):
     return data
 
 
+def parse_avg_price(order):
+    """Binance Futures market order responses often report avgPrice as
+    the literal string "0.00000000" in the instant right after the
+    order is placed -- the real fill average isn't synchronously
+    available yet. That string is truthy in Python, so the common
+    `float(order.get("avgPrice") or fallback)` pattern silently keeps
+    the useless "0.0" instead of ever reaching `fallback` (confirmed
+    live 2026-09-15: this is what several entry_price/exit_price/
+    close_price call sites across the app were doing). Returns the
+    real avgPrice as a float, or None if it's missing/zero/unparseable
+    -- callers should do `parse_avg_price(order) or fallback`."""
+    raw = order.get("avgPrice")
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def sign_query(secret, params):
     """Builds the query string Binance expects: every param, in
     insertion order, with an HMAC-SHA256 signature over that exact
