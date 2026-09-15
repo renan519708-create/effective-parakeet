@@ -471,7 +471,21 @@ def _process_follower(app, campaign, user, prices):
                 if lev_err:
                     _log_order(user.id, symbol, side, None, "open", None, "failed", f"leverage: {lev_err}")
                     continue
-                qty, size_err = broker.size_order_quantity(symbol, slice_usd, price)
+                # slice_usd is MARGIN (both the "Valor fixo por posição
+                # (USD, margem)" field and the PDF's "capitalPorAtivo
+                # como margem" are explicit about that) -- the order
+                # itself has to be sized by NOTIONAL (margin *
+                # leverage), or leverage never actually changes the
+                # real position size at all, only what fraction of it
+                # gets locked as margin. Confirmed live 2026-09-15: at
+                # 10x leverage, a $1.90 margin slice was being sized as
+                # a $1.90 notional order (10x too small), which is also
+                # why it fell under Binance's MIN_NOTIONAL floor on
+                # every single symbol. Same margin/notional convention
+                # already used correctly by the Auto-bot's own
+                # _place_live_entry.
+                notional_usd = slice_usd * settings.leverage
+                qty, size_err = broker.size_order_quantity(symbol, notional_usd, price)
                 if size_err:
                     _log_order(user.id, symbol, side, None, "open", None, "failed", str(size_err))
                     continue
@@ -547,7 +561,12 @@ def _process_follower(app, campaign, user, prices):
         if leader_symbol and freed_usd > 0:
             leader_position = open_positions[leader_symbol]
             side = "BUY" if leader_position.side == "long" else "SELL"
-            qty, size_err = broker.size_order_quantity(leader_symbol, freed_usd, prices[leader_symbol])
+            # freed_usd is freed MARGIN (a share of the stopped
+            # position's own margin) -- same margin/notional fix as the
+            # initial entry above, the add-on order needs to be sized
+            # by notional (margin * leverage), not the raw margin
+            # amount.
+            qty, size_err = broker.size_order_quantity(leader_symbol, freed_usd * settings.leverage, prices[leader_symbol])
             if not size_err:
                 order, order_err = broker.place_market_order(leader_symbol, side, qty)
                 if not order_err:
