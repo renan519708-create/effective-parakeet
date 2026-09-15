@@ -50,6 +50,25 @@
   </form>
 </div>
 
+{% if recent_open_failures %}
+<div class="panel">
+  <div class="panel-title">Sinais que falharam ao abrir (últimas 24h)</div>
+  <p class="sub">Um sinal Kairi disparou pra esses símbolos, mas a ordem real não foi enviada -- motivo exato abaixo (se um símbolo esperado não aparece aqui nem em "Posições abertas"/"Histórico", é porque o sinal simplesmente não disparou nesse período, não uma falha).</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Quando</th><th>Símbolo</th><th>Motivo</th></tr></thead>
+    <tbody>
+    {% for f in recent_open_failures %}
+      <tr>
+        <td>{{ f.created_at }}</td>
+        <td>{{ f.symbol }}</td>
+        <td>{{ f.error_message }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endif %}
+
 <div class="panel">
   <div class="panel-title">Posições abertas ({{ open_positions|length }})</div>
   {% if open_positions %}

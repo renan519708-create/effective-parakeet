@@ -5,7 +5,7 @@ management (credential, capital/leverage, on/off, manual close); every
 real order is placed by the engine's own background loop, same
 separation of concerns as operator.py/follower.py vs engine.py."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
@@ -15,7 +15,7 @@ from app.binance_broker import BinanceBroker
 from app.crypto import encrypt_secret
 from app.engine import price_roi_pct
 from app.extensions import db
-from app.models import AutoBotCredential, AutoBotPosition, AutoBotSettings
+from app.models import AutoBotCredential, AutoBotPosition, AutoBotSettings, OrderLog
 
 autobot_bp = Blueprint("autobot", __name__, url_prefix="/autobot")
 
@@ -36,6 +36,24 @@ def dashboard():
     cred = AutoBotCredential.query.filter_by(user_id=current_user.id).first()
     open_positions = AutoBotPosition.query.filter_by(user_id=current_user.id, status="open").order_by(AutoBotPosition.opened_at.desc()).all()
     closed_positions = AutoBotPosition.query.filter_by(user_id=current_user.id).filter(AutoBotPosition.status != "open").order_by(AutoBotPosition.closed_at.desc()).limit(50).all()
+
+    # Every Kairi signal that tried to open for this account but failed
+    # (leverage, sizing/MIN_NOTIONAL, order rejection, etc.) -- without
+    # this, a signal that fires but silently fails to open has zero
+    # visibility anywhere on this page (confirmed live 2026-09-15: "UNI
+    # abriu no dashboard do gg-shot-monitor e nao abriu aqui, por que?"
+    # with no way to tell "never fired here" from "fired and failed").
+    # Same idea as the operator dashboard's open_failures panel.
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    recent_open_failures = (
+        OrderLog.query
+        .filter_by(user_id=current_user.id, order_type="open", status="failed")
+        .filter(OrderLog.created_at >= since)
+        .order_by(OrderLog.created_at.desc())
+        .limit(20)
+        .all()
+    )
+
     return render_template(
         "autobot_dashboard.html",
         settings=settings,
@@ -43,6 +61,7 @@ def dashboard():
         key_valid=cred.is_valid if cred else None,
         open_positions=open_positions,
         closed_positions=closed_positions,
+        recent_open_failures=recent_open_failures,
         num_slots=NUM_SLOTS,
         stop_pct=KAIRI_STOP_PCT,
         kairi_upper=KAIRI_UPPER,
