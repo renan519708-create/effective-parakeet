@@ -120,9 +120,14 @@
   </div>
 
   {% if daily_settings.enabled %}
-    <form method="post" action="{{ url_for('operator.stop_daily_composto') }}">
+    <form method="post" action="{{ url_for('operator.stop_daily_composto') }}" style="display:inline;">
       <button class="btn btn-stop" type="submit">Desligar Diária Composta</button>
     </form>
+    {% if not campaign %}
+      <form method="post" action="{{ url_for('operator.open_daily_composto_now') }}" style="display:inline;">
+        <button class="btn btn-long" type="submit">Abrir agora (sem esperar 05:15)</button>
+      </form>
+    {% endif %}
   {% else %}
     <form method="post" action="{{ url_for('operator.start_daily_composto') }}">
       <div class="field"><span class="field-label">Stop-loss por operação (% ROI sobre margem)</span><input type="number" step="0.1" name="stop_pct" value="{{ daily_settings.stop_pct }}"></div>

@@ -174,6 +174,63 @@ def _close_position(broker, position, fallback_price, reason, user_id, leverage,
     return True, position.realized_pnl_usd
 
 
+def open_daily_composto_campaign(app, settings):
+    """Actually creates today's 'Long Diária Composta' Campaign +
+    CampaignSymbol rows + seeded FollowerCampaignState per following
+    account. Assumes the caller already confirmed it's OK to open one
+    now (the 05:15 scheduler window, or an operator's manual "Abrir
+    agora" override for testing) -- this function itself only re-checks
+    the single-campaign-slot invariant, not the clock. Returns
+    (ok: bool, message: str) so both callers can report what happened.
+    Must be called inside an app context with an open DB session."""
+    if Campaign.query.filter(Campaign.status.in_(["active", "stopping"])).first():
+        return False, "Ja existe uma campanha ativa/encerrando -- encerre antes de abrir a Diaria Composta."
+
+    testnet = app.config["BINANCE_TESTNET"]
+    try:
+        symbols = resolve_daily_long_universe(testnet)
+    except requests.RequestException as e:
+        app.logger.error(f"[engine] falha ao resolver universo da diaria composta: {e}")
+        return False, f"Falha ao consultar a Binance para montar o universo: {e}"
+    if not symbols:
+        return False, "Universo da Diaria Composta veio vazio (nenhum par valido encontrado)."
+    owner = User.query.filter_by(role="owner").first()
+    if not owner:
+        return False, "Nenhuma conta 'owner' encontrada -- nao foi possivel abrir a campanha."
+
+    campaign = Campaign(
+        direction="long", universe_scope="daily_composto", universe_params={},
+        stop_pct=settings.stop_pct, status="active", started_by_id=owner.id,
+    )
+    db.session.add(campaign)
+    db.session.flush()
+    for symbol in symbols:
+        db.session.add(CampaignSymbol(campaign_id=campaign.id, symbol=symbol, rank=None, entry_price=None))
+
+    # Seed each following account's state, carrying forward status/peak
+    # from their most recent daily_composto participation instead of
+    # always starting fresh -- this is what makes the drawdown circuit
+    # breaker (Case D, PDF section 10 -- "interromper... ate
+    # intervencao manual") survive the daily campaign turnover instead
+    # of quietly resetting every morning.
+    follower_ids = [u.id for u in User.query.join(FollowerSettings).filter(FollowerSettings.following_enabled.is_(True)).all()]
+    for user_id in follower_ids:
+        prior = (
+            FollowerCampaignState.query
+            .join(Campaign, FollowerCampaignState.campaign_id == Campaign.id)
+            .filter(Campaign.universe_scope == "daily_composto", FollowerCampaignState.user_id == user_id)
+            .order_by(Campaign.started_at.desc())
+            .first()
+        )
+        db.session.add(FollowerCampaignState(
+            campaign_id=campaign.id, user_id=user_id,
+            status=(prior.status if prior else "active"),
+            peak_portfolio_usd=(prior.peak_portfolio_usd if prior else 0.0),
+        ))
+    db.session.commit()
+    return True, f"Campanha Diaria Composta aberta com {len(symbols)} simbolo(s)."
+
+
 def _check_daily_composto_schedule(app):
     """Auto-opens/closes the 'Long Diária Composta' campaign on its own
     clock (05:15 open / 21:00 close, Brasília, every day) -- no operator
@@ -196,57 +253,7 @@ def _check_daily_composto_schedule(app):
         )
 
         if now.hour == 5 and 15 <= now.minute <= 19 and not open_today:
-            # The single "one campaign at a time" slot -- a manual
-            # Long/Short campaign (or a still-closing daily one from a
-            # prior day that ran long) already occupies it, so wait for
-            # it to finish rather than starting a second one.
-            if Campaign.query.filter(Campaign.status.in_(["active", "stopping"])).first():
-                return
-            testnet = app.config["BINANCE_TESTNET"]
-            try:
-                symbols = resolve_daily_long_universe(testnet)
-            except requests.RequestException as e:
-                app.logger.error(f"[engine] falha ao resolver universo da diaria composta: {e}")
-                return
-            if not symbols:
-                app.logger.error("[engine] universo da diaria composta veio vazio, pulando abertura de hoje")
-                return
-            owner = User.query.filter_by(role="owner").first()
-            if not owner:
-                app.logger.error("[engine] nenhum owner encontrado, nao foi possivel abrir a diaria composta")
-                return
-
-            campaign = Campaign(
-                direction="long", universe_scope="daily_composto", universe_params={},
-                stop_pct=settings.stop_pct, status="active", started_by_id=owner.id,
-            )
-            db.session.add(campaign)
-            db.session.flush()
-            for symbol in symbols:
-                db.session.add(CampaignSymbol(campaign_id=campaign.id, symbol=symbol, rank=None, entry_price=None))
-
-            # Seed each following account's state, carrying forward
-            # status/peak from their most recent daily_composto
-            # participation instead of always starting fresh -- this is
-            # what makes the drawdown circuit breaker (Case D, PDF
-            # section 10 -- "interromper... ate intervencao manual")
-            # survive the daily campaign turnover instead of quietly
-            # resetting every morning.
-            follower_ids = [u.id for u in User.query.join(FollowerSettings).filter(FollowerSettings.following_enabled.is_(True)).all()]
-            for user_id in follower_ids:
-                prior = (
-                    FollowerCampaignState.query
-                    .join(Campaign, FollowerCampaignState.campaign_id == Campaign.id)
-                    .filter(Campaign.universe_scope == "daily_composto", FollowerCampaignState.user_id == user_id)
-                    .order_by(Campaign.started_at.desc())
-                    .first()
-                )
-                db.session.add(FollowerCampaignState(
-                    campaign_id=campaign.id, user_id=user_id,
-                    status=(prior.status if prior else "active"),
-                    peak_portfolio_usd=(prior.peak_portfolio_usd if prior else 0.0),
-                ))
-            db.session.commit()
+            open_daily_composto_campaign(app, settings)
             return
 
         if now.hour == 21 and 0 <= now.minute <= 4 and existing and existing.status == "active":

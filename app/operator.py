@@ -9,7 +9,7 @@ from functools import wraps
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
-from app.engine import campaign_result_pct, fetch_prices, price_roi_pct
+from app.engine import campaign_result_pct, fetch_prices, open_daily_composto_campaign, price_roi_pct
 from app.extensions import db
 from app.models import Campaign, CampaignSymbol, DailyCompostoSettings, FollowerAllocation, FollowerCampaignState, OrderLog, Position, User
 from app.universe import rank_symbol_universe, resolve_symbol_universe
@@ -433,6 +433,26 @@ def start_daily_composto():
     settings.stop_pct = stop_pct
     db.session.commit()
     flash(f"Diaria Composta ligada -- abre automaticamente as 05:15 (Brasilia), stop de {stop_pct}%.", "success")
+    return redirect(url_for("operator.dashboard"))
+
+
+@operator_bp.route("/campanha/diaria/abrir-agora", methods=["POST"])
+@operator_required
+def open_daily_composto_now():
+    """Manual override to open today's Diária Composta immediately,
+    bypassing the 05:15-05:19 window -- mainly for testing/debugging
+    (confirmed live 2026-09-15: useful to re-trigger a diagnosis same-
+    day instead of waiting for tomorrow's window). Reuses the exact
+    same open_daily_composto_campaign() the scheduler itself calls, so
+    behavior (universe resolution, per-follower state seeding, the
+    single-slot check) is identical either way -- this just skips the
+    clock check."""
+    settings = DailyCompostoSettings.query.get(1)
+    if not settings or not settings.enabled:
+        flash("Ligue a Diaria Composta primeiro (defina o stop e salve) antes de abrir manualmente.", "error")
+        return redirect(url_for("operator.dashboard"))
+    ok, message = open_daily_composto_campaign(current_app, settings)
+    flash(message, "success" if ok else "error")
     return redirect(url_for("operator.dashboard"))
 
 
