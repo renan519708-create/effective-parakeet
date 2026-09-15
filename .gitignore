@@ -8,3 +8,6 @@ instance/
 .venv/
 venv/
 .superpowers/
+# Large ad hoc candle caches from backtest scripts -- regenerate with
+# each script's own --fetch, never worth version-controlling.
+data_*_candles.pkl

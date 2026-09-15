@@ -170,3 +170,21 @@ def close_position(position_id):
     db.session.commit()
     flash(f"Posicao em {position.symbol} encerrada manualmente ({raw_pct:+.2f}%).", "success")
     return redirect(url_for("autobot.dashboard"))
+
+
+@autobot_bp.route("/historico/limpar", methods=["POST"])
+@login_required
+def clear_history():
+    """Deletes this account's own CLOSED AutoBotPosition rows only
+    (green/red/stopped/liquidated) -- e.g. to start tracking cleanly
+    after testnet-era trades mixed into the same history as real
+    mainnet ones. Never touches a status="open" row: that would orphan
+    a real, still-open Binance position with no record left for the
+    engine (or the operator) to ever close it against."""
+    deleted = AutoBotPosition.query.filter(
+        AutoBotPosition.user_id == current_user.id,
+        AutoBotPosition.status != "open",
+    ).delete(synchronize_session=False)
+    db.session.commit()
+    flash(f"Historico limpo -- {deleted} operacao(oes) encerrada(s) removida(s). Posicoes abertas nao foram tocadas.", "success")
+    return redirect(url_for("autobot.dashboard"))
