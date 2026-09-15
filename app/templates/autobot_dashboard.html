@@ -101,7 +101,7 @@
       <button class="btn btn-stop" type="submit">Limpar histórico</button>
     </form>
   <div class="table-wrap"><table>
-    <thead><tr><th>Símbolo</th><th>Direção</th><th>Entrada</th><th>Saída</th><th>Resultado</th><th>% (ROI alavancado)</th><th>PnL USD</th></tr></thead>
+    <thead><tr><th>Símbolo</th><th>Direção</th><th>Entrada</th><th>Saída</th><th>Resultado</th><th>% (ROI alavancado)</th><th>PnL USD</th><th></th></tr></thead>
     <tbody>
     {% for p in closed_positions %}
       {% set lev = p.leverage or settings.leverage %}
@@ -114,6 +114,11 @@
         <td>{{ p.status }}</td>
         <td class="{{ 'pnl-pos' if (roi or 0) >= 0 else 'pnl-neg' }}">{{ '%+.2f%%'|format(roi) if roi is not none else '-' }} <span class="field-hint">({{ lev }}x)</span></td>
         <td class="{{ 'pnl-pos' if (p.realized_pnl_usd or 0) >= 0 else 'pnl-neg' }}">{{ '%.2f'|format(p.realized_pnl_usd or 0) }}</td>
+        <td>
+          <form method="post" action="{{ url_for('autobot.recalculate_position', position_id=p.id) }}" style="display:inline;">
+            <button class="btn" type="submit" style="padding:3px 9px; font-size:11px;">Recalcular</button>
+          </form>
+        </td>
       </tr>
     {% endfor %}
     </tbody>

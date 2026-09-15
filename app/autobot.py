@@ -210,3 +210,46 @@ def clear_history():
     db.session.commit()
     flash(f"Historico limpo -- {deleted} operacao(oes) encerrada(s) removida(s). Posicoes abertas nao foram tocadas.", "success")
     return redirect(url_for("autobot.dashboard"))
+
+
+@autobot_bp.route("/posicao/<int:position_id>/recalcular", methods=["POST"])
+@login_required
+def recalculate_position(position_id):
+    """Re-pulls this ALREADY-CLOSED position's real result straight
+    from Binance's own trade history and overwrites the stored
+    close_price/result_pct/realized_pnl_usd/status -- for exactly the
+    scenario _check_exit now handles going forward (a position found
+    already flat, e.g. a fast liquidation, whose recorded result came
+    from a stale theoretical price before that fix existed). Only
+    touches rows the fix couldn't have reached automatically (this
+    account's own already-closed positions), never an open one."""
+    position = AutoBotPosition.query.get(position_id)
+    if not position or position.user_id != current_user.id:
+        flash("Posicao nao encontrada.", "error")
+        return redirect(url_for("autobot.dashboard"))
+    if position.status == "open":
+        flash("Essa posicao ainda esta aberta -- nada a recalcular.", "error")
+        return redirect(url_for("autobot.dashboard"))
+
+    testnet = current_app.config["AUTOBOT_TESTNET"]
+    encryption_key = current_app.config["ENCRYPTION_KEY"]
+    broker, err = _build_autobot_broker(current_user.id, encryption_key, testnet)
+    if not broker:
+        flash(f"Nao foi possivel recalcular: {err}", "error")
+        return redirect(url_for("autobot.dashboard"))
+
+    real_price, trade_err = broker.get_last_trade_price(position.symbol, since_ms=position.entry_time)
+    if real_price is None:
+        flash(f"Nao encontrei um trade real da Binance pra recalcular: {trade_err}", "error")
+        return redirect(url_for("autobot.dashboard"))
+
+    leverage = position.leverage if position.leverage is not None else (AutoBotSettings.query.get(current_user.id).leverage or 1)
+    raw_pct = price_roi_pct(position.direction.lower(), position.entry_price, real_price, 1)
+
+    position.close_price = real_price
+    position.result_pct = raw_pct
+    position.realized_pnl_usd = position.allocated_usd * leverage * (raw_pct / 100)
+    position.status = "green" if raw_pct >= 0 else "red"
+    db.session.commit()
+    flash(f"Recalculado com o preco real da Binance -- {position.symbol}: {raw_pct:+.2f}% (${position.realized_pnl_usd:+.2f}).", "success")
+    return redirect(url_for("autobot.dashboard"))
