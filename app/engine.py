@@ -13,6 +13,7 @@ else's account.
 import concurrent.futures
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -20,9 +21,12 @@ from app.binance_broker import BinanceBroker, TESTNET_BASE_URL, MAINNET_BASE_URL
 from app.crypto import decrypt_secret
 from app.extensions import db
 from app.models import (
-    Campaign, CampaignSymbol, FollowerAllocation, FollowerCampaignState,
-    FollowerSettings, OrderLog, Position, User,
+    Campaign, CampaignSymbol, DailyCompostoSettings, FollowerAllocation,
+    FollowerCampaignState, FollowerSettings, OrderLog, Position, User,
 )
+from app.universe import resolve_daily_long_universe
+
+BRASILIA_TZ = timezone(timedelta(hours=-3))
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +174,86 @@ def _close_position(broker, position, fallback_price, reason, user_id, leverage,
     return True, position.realized_pnl_usd
 
 
+def _check_daily_composto_schedule(app):
+    """Auto-opens/closes the 'Long Diária Composta' campaign on its own
+    clock (05:15 open / 21:00 close, Brasília, every day) -- no operator
+    click needed once DailyCompostoSettings.enabled is on. Runs at the
+    very top of run_tick, before the single active/stopping campaign
+    query there, so a campaign created here is picked up by the SAME
+    tick's normal Case A-D pass. See universe.py's
+    resolve_daily_long_universe for the fixed 53-asset list this
+    strategy trades (PDF: estrategia_long_diaria_composta.pdf)."""
+    with app.app_context():
+        settings = DailyCompostoSettings.query.get(1)
+        if not settings or not settings.enabled:
+            return
+
+        now = datetime.now(BRASILIA_TZ)
+        existing = Campaign.query.filter_by(universe_scope="daily_composto").order_by(Campaign.started_at.desc()).first()
+        open_today = bool(
+            existing and existing.status in ("active", "stopping")
+            and existing.started_at.astimezone(BRASILIA_TZ).date() == now.date()
+        )
+
+        if now.hour == 5 and 15 <= now.minute <= 19 and not open_today:
+            # The single "one campaign at a time" slot -- a manual
+            # Long/Short campaign (or a still-closing daily one from a
+            # prior day that ran long) already occupies it, so wait for
+            # it to finish rather than starting a second one.
+            if Campaign.query.filter(Campaign.status.in_(["active", "stopping"])).first():
+                return
+            testnet = app.config["BINANCE_TESTNET"]
+            try:
+                symbols = resolve_daily_long_universe(testnet)
+            except requests.RequestException as e:
+                app.logger.error(f"[engine] falha ao resolver universo da diaria composta: {e}")
+                return
+            if not symbols:
+                app.logger.error("[engine] universo da diaria composta veio vazio, pulando abertura de hoje")
+                return
+            owner = User.query.filter_by(role="owner").first()
+            if not owner:
+                app.logger.error("[engine] nenhum owner encontrado, nao foi possivel abrir a diaria composta")
+                return
+
+            campaign = Campaign(
+                direction="long", universe_scope="daily_composto", universe_params={},
+                stop_pct=settings.stop_pct, status="active", started_by_id=owner.id,
+            )
+            db.session.add(campaign)
+            db.session.flush()
+            for symbol in symbols:
+                db.session.add(CampaignSymbol(campaign_id=campaign.id, symbol=symbol, rank=None, entry_price=None))
+
+            # Seed each following account's state, carrying forward
+            # status/peak from their most recent daily_composto
+            # participation instead of always starting fresh -- this is
+            # what makes the drawdown circuit breaker (Case D, PDF
+            # section 10 -- "interromper... ate intervencao manual")
+            # survive the daily campaign turnover instead of quietly
+            # resetting every morning.
+            follower_ids = [u.id for u in User.query.join(FollowerSettings).filter(FollowerSettings.following_enabled.is_(True)).all()]
+            for user_id in follower_ids:
+                prior = (
+                    FollowerCampaignState.query
+                    .join(Campaign, FollowerCampaignState.campaign_id == Campaign.id)
+                    .filter(Campaign.universe_scope == "daily_composto", FollowerCampaignState.user_id == user_id)
+                    .order_by(Campaign.started_at.desc())
+                    .first()
+                )
+                db.session.add(FollowerCampaignState(
+                    campaign_id=campaign.id, user_id=user_id,
+                    status=(prior.status if prior else "active"),
+                    peak_portfolio_usd=(prior.peak_portfolio_usd if prior else 0.0),
+                ))
+            db.session.commit()
+            return
+
+        if now.hour == 21 and 0 <= now.minute <= 4 and existing and existing.status == "active":
+            existing.status = "stopping"
+            db.session.commit()
+
+
 def run_tick(app):
     """One full pass over the single active/stopping campaign (if any).
     Meant to be called repeatedly by start_background_engine.
@@ -194,6 +278,8 @@ def run_tick(app):
       own following_enabled toggle. Once no open positions remain
       campaign-wide, flips to "stopped".
     """
+    _check_daily_composto_schedule(app)
+
     with app.app_context():
         campaign = Campaign.query.filter(Campaign.status.in_(["active", "stopping"])).first()
         if not campaign:
@@ -332,17 +418,30 @@ def _process_follower(app, campaign, user, prices):
         state.status = "opening"
         db.session.commit()
         try:
-            # Fixed USD margin per position, same predictable-per-trade
-            # model the Auto-bot already uses -- confirmed live 2026-09-14:
-            # the old "% of available balance / number of symbols" scheme
-            # produced confusingly tiny, hard-to-predict sizes (an 80%
-            # risk_pct still landed on ~$1/position once split across a
-            # 10-symbol campaign, and the "available balance" half of the
-            # formula shrinks further whenever the Auto-bot has its own
-            # margin locked on the same account). trade_size_usd is set
-            # once in "Minha conta" and means exactly what it says,
-            # independent of campaign size or what else is running.
-            slice_usd = settings.trade_size_usd
+            if campaign.universe_scope == "daily_composto":
+                # "Long Diária Composta": capitalPorAtivo = saldo total
+                # atual / numero de ativos (PDF section 5) -- the
+                # account's real Binance balance already IS "capital
+                # inicial + resultados realizados", so this is compound
+                # growth with zero extra bookkeeping: today's balance
+                # already reflects every previous day's real P&L.
+                balance, bal_err = broker.get_account_balance()
+                if bal_err:
+                    _log_order(user.id, "-", "-", None, "open", None, "failed", f"saldo indisponivel: {bal_err}")
+                    return
+                slice_usd = (balance / len(campaign.symbols)) if campaign.symbols else 0.0
+            else:
+                # Fixed USD margin per position, same predictable-per-trade
+                # model the Auto-bot already uses -- confirmed live 2026-09-14:
+                # the old "% of available balance / number of symbols" scheme
+                # produced confusingly tiny, hard-to-predict sizes (an 80%
+                # risk_pct still landed on ~$1/position once split across a
+                # 10-symbol campaign, and the "available balance" half of the
+                # formula shrinks further whenever the Auto-bot has its own
+                # margin locked on the same account). trade_size_usd is set
+                # once in "Minha conta" and means exactly what it says,
+                # independent of campaign size or what else is running.
+                slice_usd = settings.trade_size_usd
             side = "BUY" if campaign.direction == "long" else "SELL"
             for cs in campaign.symbols:
                 symbol = cs.symbol

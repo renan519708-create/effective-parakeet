@@ -11,7 +11,7 @@ from flask_login import current_user, login_required
 
 from app.engine import campaign_result_pct, fetch_prices, price_roi_pct
 from app.extensions import db
-from app.models import Campaign, CampaignSymbol, FollowerAllocation, FollowerCampaignState, OrderLog, Position, User
+from app.models import Campaign, CampaignSymbol, DailyCompostoSettings, FollowerAllocation, FollowerCampaignState, OrderLog, Position, User
 from app.universe import rank_symbol_universe, resolve_symbol_universe
 
 operator_bp = Blueprint("operator", __name__, url_prefix="/operador")
@@ -144,6 +144,35 @@ def dashboard():
         for c in last_campaigns
     }
 
+    daily_settings = DailyCompostoSettings.query.get(1)
+    if daily_settings is None:
+        daily_settings = DailyCompostoSettings(id=1)
+        db.session.add(daily_settings)
+        db.session.commit()
+
+    # Most recent daily_composto participation per user, filtered down
+    # to whoever's currently halted (status="inactive") -- these are
+    # the accounts section 10's drawdown circuit breaker has stopped,
+    # waiting on the "Reativar" button below (manual intervention, on
+    # purpose -- see app/engine.py's _check_daily_composto_schedule).
+    daily_campaign_ids = [c.id for c in Campaign.query.filter_by(universe_scope="daily_composto").all()]
+    halted_followers = []
+    if daily_campaign_ids:
+        latest_per_user = {}
+        rows = (
+            FollowerCampaignState.query
+            .join(Campaign, FollowerCampaignState.campaign_id == Campaign.id)
+            .filter(FollowerCampaignState.campaign_id.in_(daily_campaign_ids))
+            .order_by(Campaign.started_at.asc())
+            .all()
+        )
+        for r in rows:
+            latest_per_user[r.user_id] = r  # last write per user wins, rows are chronological
+        for state in latest_per_user.values():
+            if state.status == "inactive":
+                user = User.query.get(state.user_id)
+                halted_followers.append({"user_id": state.user_id, "email": user.email if user else f"user#{state.user_id}"})
+
     return render_template(
         "operator_dashboard.html",
         campaign=campaign,
@@ -152,6 +181,8 @@ def dashboard():
         live=live,
         results=results,
         stuck_reasons=stuck_reasons,
+        daily_settings=daily_settings,
+        halted_followers=halted_followers,
     )
 
 
@@ -345,4 +376,69 @@ def promote_operator():
         user.role = "operator"
         db.session.commit()
         flash(f"{email} agora e operador.", "success")
+    return redirect(url_for("operator.dashboard"))
+
+
+@operator_bp.route("/campanha/diaria/ligar", methods=["POST"])
+@operator_required
+def start_daily_composto():
+    """Doesn't create today's campaign directly -- the engine's own
+    scheduler (_check_daily_composto_schedule) does that at the next
+    05:15 Brasilia window, same "HTTP request just flips a flag, the
+    engine thread does the real work" split as stop_campaign/
+    reset_campaign. Blocked while the single active/stopping campaign
+    slot is already taken (manual campaign, or a still-closing daily
+    one), same rule start_campaign already enforces."""
+    if Campaign.query.filter(Campaign.status.in_(["active", "stopping"])).first():
+        flash("Ja existe uma campanha ativa -- encerre antes de ligar a Diaria Composta.", "error")
+        return redirect(url_for("operator.dashboard"))
+
+    stop_pct = _parse_float(request.form.get("stop_pct"), 10.0)
+    settings = DailyCompostoSettings.query.get(1)
+    if settings is None:
+        settings = DailyCompostoSettings(id=1)
+        db.session.add(settings)
+    settings.enabled = True
+    settings.stop_pct = stop_pct
+    db.session.commit()
+    flash(f"Diaria Composta ligada -- abre automaticamente as 05:15 (Brasilia), stop de {stop_pct}%.", "success")
+    return redirect(url_for("operator.dashboard"))
+
+
+@operator_bp.route("/campanha/diaria/desligar", methods=["POST"])
+@operator_required
+def stop_daily_composto():
+    """Only stops future days -- today's campaign (if any) keeps
+    running to its normal 21:00 close. Use the generic "Encerrar
+    operacoes" button to end today's early instead."""
+    settings = DailyCompostoSettings.query.get(1)
+    if settings:
+        settings.enabled = False
+        db.session.commit()
+    flash("Diaria Composta desligada -- nao abre mais amanha. A campanha de hoje (se houver) segue ate as 21:00.", "success")
+    return redirect(url_for("operator.dashboard"))
+
+
+@operator_bp.route("/campanha/diaria/reativar/<int:user_id>", methods=["POST"])
+@operator_required
+def reactivate_daily_composto(user_id):
+    """The "manual intervention" the strategy's drawdown circuit
+    breaker (section 10) requires before a halted account resumes --
+    resets that account's most recent daily_composto
+    FollowerCampaignState back to active with a fresh peak, so the next
+    day it participates normally again."""
+    state = (
+        FollowerCampaignState.query
+        .join(Campaign, FollowerCampaignState.campaign_id == Campaign.id)
+        .filter(Campaign.universe_scope == "daily_composto", FollowerCampaignState.user_id == user_id)
+        .order_by(Campaign.started_at.desc())
+        .first()
+    )
+    if not state:
+        flash("Nenhum historico de Diaria Composta encontrado para essa conta.", "error")
+        return redirect(url_for("operator.dashboard"))
+    state.status = "active"
+    state.peak_portfolio_usd = 0.0
+    db.session.commit()
+    flash("Conta reativada -- volta a participar a partir do proximo dia.", "success")
     return redirect(url_for("operator.dashboard"))

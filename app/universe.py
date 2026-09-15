@@ -200,3 +200,28 @@ def resolve_symbol_universe(scope, params, ref_ms, testnet):
         return [{"symbol": r["symbol"], "rank": i + 1} for i, r in enumerate(top)]
 
     raise ValueError(f"escopo de universo desconhecido: {scope}")
+
+
+# Fixed universe for the "Long Diária Composta" scheduled campaign (see
+# app/engine.py's _check_daily_composto_schedule) -- from the strategy
+# spec PDF (estrategia_long_diaria_composta.pdf), section 1. Validated
+# live 2026-09-15 against /fapi/v1/exchangeInfo on mainnet: 53/53
+# tickers resolve to a real tradeable USDT perpetual, including the 5
+# the document's author flagged as uncertain (CC, LIT, VVV, STABLE,
+# JST). SHIB/PEPE/TON were already excluded by the author on request.
+DAILY_LONG_TICKERS = [
+    "BTC", "ETH", "BNB", "XRP", "SOL", "TRX", "HYPE", "ZEC", "DOGE", "XMR",
+    "LINK", "ADA", "XLM", "BCH", "LTC", "UNI", "CC", "HBAR", "AVAX", "NEAR",
+    "SUI", "XAUT", "TAO", "AAVE", "ASTER", "PAXG", "WLFI", "ONDO", "DOT",
+    "PUMP", "ICP", "SKY", "ENA", "WLD", "ETC", "MORPHO", "LIT", "VVV", "POL",
+    "KAS", "JST", "ARB", "ALGO", "ATOM", "JUP", "FIL", "QNT", "CAKE",
+    "STABLE", "RENDER", "DASH", "VET", "INJ",
+]
+
+
+def resolve_daily_long_universe(testnet):
+    """Any ticker no longer tradeable is just dropped, never raises --
+    matches the spec's "Qualquer par que não existir deve simplesmente
+    ser removido do universo, sem travar a automação"."""
+    valid = fetch_binance_futures_symbols(testnet)
+    return [f"{t}USDT" for t in DAILY_LONG_TICKERS if f"{t}USDT" in valid]

@@ -89,6 +89,39 @@
   {% endif %}
 </div>
 
+<div class="panel">
+  <div class="panel-title">Diária Composta (Long, todas as moedas, 05:15-21:00 Brasília)</div>
+  <p class="sub">
+    Status: <span class="status-tag">{{ 'ligada' if daily_settings.enabled else 'desligada' }}</span> &middot;
+    Stop por operação: {{ daily_settings.stop_pct }}%
+  </p>
+  <p class="sub">Abre sozinha às 05:15 e fecha às 21:00 (Brasília) todo dia, sempre comprada em todas as moedas do universo fixo, dividindo o saldo real de cada seguidor igualmente entre elas -- reusa "Seguir operações" de Minha conta, os mesmos seguidores da campanha manual. Enquanto ligada, não dá pra também rodar uma campanha manual Long/Short (usam a mesma vaga).</p>
+  {% if daily_settings.enabled %}
+    <form method="post" action="{{ url_for('operator.stop_daily_composto') }}">
+      <button class="btn btn-stop" type="submit">Desligar Diária Composta</button>
+    </form>
+  {% else %}
+    <form method="post" action="{{ url_for('operator.start_daily_composto') }}">
+      <div class="field"><span class="field-label">Stop-loss por operação (% ROI sobre margem)</span><input type="number" step="0.1" name="stop_pct" value="{{ daily_settings.stop_pct }}"></div>
+      <button class="btn btn-long" type="submit">Ligar Diária Composta</button>
+    </form>
+  {% endif %}
+  {% if halted_followers %}
+    <div class="flash flash-error" style="margin-top:12px;">
+      <strong>{{ halted_followers|length }} conta(s) parada(s) por drawdown -- aguardando reativação manual:</strong>
+      <ul style="margin:6px 0 0 18px; padding:0;">
+      {% for h in halted_followers %}
+        <li>{{ h.email }}
+          <form method="post" action="{{ url_for('operator.reactivate_daily_composto', user_id=h.user_id) }}" style="display:inline;">
+            <button class="btn" type="submit" style="padding:2px 8px; font-size:11px; margin-left:6px;">Reativar</button>
+          </form>
+        </li>
+      {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+</div>
+
 {% if is_owner %}
 <div class="panel">
   <div class="panel-title">Promover operador</div>

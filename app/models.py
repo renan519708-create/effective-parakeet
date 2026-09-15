@@ -83,6 +83,21 @@ class FollowerSettings(db.Model):
     user = db.relationship("User", back_populates="settings")
 
 
+class DailyCompostoSettings(db.Model):
+    """Singleton (always id=1) -- operator-wide on/off + stop_pct for the
+    'Long Diária Composta' scheduled campaign (see app/engine.py's
+    _check_daily_composto_schedule). Not per-follower: this strategy has
+    no Long/Short choice, so the operator's only real decision here is
+    ligar/desligar and the shared stop_pct (PDF's "perda máxima por
+    trade", a team-wide parameter, not per-account)."""
+    __tablename__ = "daily_composto_settings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    enabled = db.Column(db.Boolean, nullable=False, default=False)
+    stop_pct = db.Column(db.Float, nullable=False, default=10.0)
+    updated_at = db.Column(db.DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 class Campaign(db.Model):
     __tablename__ = "campaigns"
 
