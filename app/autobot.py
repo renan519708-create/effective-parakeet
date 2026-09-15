@@ -54,6 +54,27 @@ def dashboard():
         .all()
     )
 
+    # Summary scoreboard for the whole history, not just the 50 most
+    # recent rows shown in the table below -- one aggregate query
+    # rather than summing closed_positions in Python (which is capped
+    # at 50 and would silently under-count for an active account).
+    all_closed_q = AutoBotPosition.query.filter_by(user_id=current_user.id).filter(AutoBotPosition.status != "open")
+    trade_count = all_closed_q.count()
+    win_count = all_closed_q.filter(AutoBotPosition.status == "green").count()
+    total_realized_pnl = db.session.query(db.func.coalesce(db.func.sum(AutoBotPosition.realized_pnl_usd), 0.0)).filter(
+        AutoBotPosition.user_id == current_user.id, AutoBotPosition.status != "open",
+    ).scalar()
+    # % against the capital this account has dedicated to the
+    # strategy (settings.capital_usd) -- not a fetched live Binance
+    # balance, since that would also reflect the Auto-bot's OTHER
+    # activity (open positions' margin) and anything else happening on
+    # a shared account, muddying what this scoreboard is meant to show:
+    # the bot's own cumulative result relative to what was allocated to
+    # it.
+    pct_total = (total_realized_pnl / settings.capital_usd * 100) if settings.capital_usd > 0 else 0.0
+    saldo_total = settings.capital_usd + total_realized_pnl
+    win_rate = (win_count / trade_count * 100) if trade_count > 0 else 0.0
+
     return render_template(
         "autobot_dashboard.html",
         settings=settings,
@@ -67,6 +88,11 @@ def dashboard():
         kairi_upper=KAIRI_UPPER,
         kairi_lower=KAIRI_LOWER,
         testnet=current_app.config["AUTOBOT_TESTNET"],
+        trade_count=trade_count,
+        win_rate=win_rate,
+        total_realized_pnl=total_realized_pnl,
+        pct_total=pct_total,
+        saldo_total=saldo_total,
     )
 
 

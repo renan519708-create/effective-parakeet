@@ -94,6 +94,29 @@
   {% else %}<div class="empty-state">Nenhuma posição aberta.</div>{% endif %}
 </div>
 
+<div class="metrics-grid">
+  <div class="metric-card">
+    <div class="metric-label">Saldo total</div>
+    <div class="metric-value">${{ '%.2f'|format(saldo_total) }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Resultado acumulado</div>
+    <div class="metric-value {{ 'pnl-pos' if pct_total >= 0 else 'pnl-neg' }}">{{ '%+.2f%%'|format(pct_total) }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">PnL acumulado (USD)</div>
+    <div class="metric-value {{ 'pnl-pos' if total_realized_pnl >= 0 else 'pnl-neg' }}">${{ '%+.2f'|format(total_realized_pnl) }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Operações encerradas</div>
+    <div class="metric-value">{{ trade_count }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Taxa de acerto</div>
+    <div class="metric-value">{{ '%.0f%%'|format(win_rate) }}</div>
+  </div>
+</div>
+
 <div class="panel">
   <div class="panel-title">Histórico ({{ closed_positions|length }})</div>
   {% if closed_positions %}
