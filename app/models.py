@@ -74,6 +74,19 @@ class FollowerSettings(db.Model):
     # any existing production row, no migration to drop it) but is no
     # longer read anywhere.
     trade_size_usd = db.Column(db.Float, nullable=False, default=10.0)
+    # Per-follower cap on how much of THIS account's real balance the
+    # "Diária Composta" campaign (app/engine.py's _check_daily_composto_
+    # schedule) is allowed to use -- 0.0 means "no cap, use the full
+    # available balance" (the original default behavior). Added so an
+    # account running the Auto-bot on the SAME Binance account doesn't
+    # have Diária Composta silently claim its entire free margin every
+    # morning at 05:15 -- see Case A's "if campaign.universe_scope ==
+    # daily_composto" branch, which takes min(real_balance, this cap).
+    # Leverage is intentionally NOT a separate field here -- the
+    # existing `leverage` column below already applies uniformly across
+    # every symbol of any campaign scope (Case A/C already read it),
+    # matching the PDF spec's "mesma alavancagem para todos os ativos".
+    daily_composto_capital_usd = db.Column(db.Float, nullable=False, default=0.0)
     risk_pct = db.Column(db.Float, nullable=False, default=10.0)
     leverage = db.Column(db.Integer, nullable=False, default=1)
     max_drawdown_enabled = db.Column(db.Boolean, nullable=False, default=True)

@@ -90,6 +90,7 @@ def save_settings():
     settings = current_user.settings
     try:
         settings.trade_size_usd = max(1.0, float(request.form.get("trade_size_usd", settings.trade_size_usd)))
+        settings.daily_composto_capital_usd = max(0.0, float(request.form.get("daily_composto_capital_usd", settings.daily_composto_capital_usd)))
         settings.leverage = max(1, int(request.form.get("leverage", settings.leverage)))
         settings.max_drawdown_pct = max(1.0, min(99.0, float(request.form.get("max_drawdown_pct", settings.max_drawdown_pct))))
     except ValueError:

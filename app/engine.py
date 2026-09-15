@@ -429,7 +429,16 @@ def _process_follower(app, campaign, user, prices):
                 if bal_err:
                     _log_order(user.id, "-", "-", None, "open", None, "failed", f"saldo indisponivel: {bal_err}")
                     return
-                slice_usd = (balance / len(campaign.symbols)) if campaign.symbols else 0.0
+                # Per-follower cap (0 = no cap, use the full available
+                # balance) -- added 2026-09-15 so an account also running
+                # the Auto-bot doesn't have this strategy silently claim
+                # 100% of that shared account's free margin every
+                # morning. Caps DOWN only: never allocates more than
+                # what's actually free, even if the cap is set higher
+                # than the real balance.
+                cap = settings.daily_composto_capital_usd
+                capital_total = min(balance, cap) if cap and cap > 0 else balance
+                slice_usd = (capital_total / len(campaign.symbols)) if campaign.symbols else 0.0
             else:
                 # Fixed USD margin per position, same predictable-per-trade
                 # model the Auto-bot already uses -- confirmed live 2026-09-14:

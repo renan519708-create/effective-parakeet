@@ -25,7 +25,9 @@
       <div class="field"><span class="field-label">Valor fixo por posição (USD, margem)</span><input type="number" step="1" min="1" name="trade_size_usd" value="{{ settings.trade_size_usd }}"></div>
       <div class="field"><span class="field-label">Alavancagem (x)</span><input type="number" name="leverage" value="{{ settings.leverage }}" min="1" max="125"></div>
     </div>
-    <p class="sub">Cada símbolo de uma campanha abre com esse valor de margem -- uma campanha de 10 símbolos usa 10× esse valor no total, independente do seu saldo.</p>
+    <p class="sub">Cada símbolo de uma campanha manual (Long/Short) abre com esse valor de margem -- uma campanha de 10 símbolos usa 10× esse valor no total, independente do seu saldo. Não vale para a Diária Composta, que usa o campo abaixo.</p>
+    <div class="field"><span class="field-label">Capital total usado na Diária Composta (USD, 0 = sem limite)</span><input type="number" step="1" min="0" name="daily_composto_capital_usd" value="{{ settings.daily_composto_capital_usd }}"></div>
+    <p class="sub">Teto do seu saldo disponível que a Diária Composta pode usar, dividido igualmente entre as moedas do dia -- útil se você também roda o Auto-bot na mesma conta e quer deixar saldo livre pra ele. Deixe 0 pra usar 100% do saldo disponível a cada dia (comportamento padrão). A alavancagem usada é a mesma configurada acima.</p>
     <div class="toggle-row">
       <span class="field-label">Drawdown máximo da minha carteira</span>
       <input type="checkbox" name="max_drawdown_enabled" {% if settings.max_drawdown_enabled %}checked{% endif %}>
