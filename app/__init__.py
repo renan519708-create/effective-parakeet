@@ -2,11 +2,29 @@
 starts the background trading engine. `python manage.py runserver` or
 a WSGI server (gunicorn "app:create_app()") both go through here."""
 
+from datetime import timezone, timedelta
+
 from flask import Flask
 from sqlalchemy import text
 
 from app.config import Config
 from app.extensions import db, login_manager
+
+BRASILIA_TZ = timezone(timedelta(hours=-3))
+
+
+def _brasilia_filter(value):
+    """Jinja filter: renders a UTC-aware datetime (every timestamp in
+    this app is stored via _utcnow()) in Brasília local time (UTC-3,
+    fixed, no DST) instead of the raw UTC value templates were printing
+    directly -- confirmed live 2026-09-15: showing raw UTC (+00:00)
+    timestamps read as "o horario esta errado" to a Brasília-based
+    operator, since it's 3 hours ahead of their own wall clock."""
+    if value is None:
+        return "-"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(BRASILIA_TZ).strftime("%d/%m/%Y %H:%M:%S")
 
 
 def _patch_schema():
@@ -42,6 +60,7 @@ def create_app(config_class=Config, start_engine=True):
 
     db.init_app(app)
     login_manager.init_app(app)
+    app.jinja_env.filters["brasilia"] = _brasilia_filter
 
     from app import models  # noqa: F401 -- registers models with SQLAlchemy
 

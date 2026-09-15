@@ -59,7 +59,7 @@
     <tbody>
     {% for f in recent_open_failures %}
       <tr>
-        <td>{{ f.created_at }}</td>
+        <td>{{ f.created_at|brasilia }}</td>
         <td>{{ f.symbol }}</td>
         <td>{{ f.error_message }}</td>
       </tr>
@@ -80,7 +80,7 @@
         <td>{{ p.symbol }}</td>
         <td><span class="side-tag {{ 'side-long' if p.direction == 'LONG' else 'side-short' }}">{{ p.direction }}</span></td>
         <td>{{ p.entry_price }}</td>
-        <td>{{ p.opened_at }}</td>
+        <td>{{ p.opened_at|brasilia }}</td>
         <td>{{ '%.2f'|format(p.allocated_usd) }}</td>
         <td>
           <form method="post" action="{{ url_for('autobot.close_position', position_id=p.id) }}" style="display:inline;">

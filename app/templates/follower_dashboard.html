@@ -58,7 +58,7 @@
         <td>{{ p.symbol }}</td>
         <td><span class="side-tag {{ 'side-long' if p.side == 'long' else 'side-short' }}">{{ p.side.upper() }}</span></td>
         <td>{{ p.entry_price }}</td>
-        <td>{{ p.opened_at }}</td>
+        <td>{{ p.opened_at|brasilia }}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -97,7 +97,7 @@
     <thead><tr><th>Código</th><th>Status</th><th>Criado em</th></tr></thead>
     <tbody>
     {% for i in invites %}
-      <tr><td>{{ i.code }}</td><td>{{ 'usado' if i.is_used else 'disponível' }}</td><td>{{ i.created_at }}</td></tr>
+      <tr><td>{{ i.code }}</td><td>{{ 'usado' if i.is_used else 'disponível' }}</td><td>{{ i.created_at|brasilia }}</td></tr>
     {% endfor %}
     </tbody>
   </table></div>

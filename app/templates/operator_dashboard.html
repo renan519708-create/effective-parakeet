@@ -171,8 +171,8 @@
         <td><span class="side-tag {{ 'side-long' if c.direction == 'long' else 'side-short' }}">{{ c.direction.upper() }}</span></td>
         <td>{{ c.universe_scope }}</td>
         <td>{{ c.status }}</td>
-        <td>{{ c.started_at }}</td>
-        <td>{{ c.ended_at or '-' }}</td>
+        <td>{{ c.started_at|brasilia }}</td>
+        <td>{{ c.ended_at|brasilia if c.ended_at else '-' }}</td>
         <td class="{{ '' if r is none else ('pnl-pos' if r >= 0 else 'pnl-neg') }}">{{ '%+.2f%%'|format(r) if r is not none else '-' }}</td>
         <td>
           {% if c.status not in ('active', 'stopping') %}
