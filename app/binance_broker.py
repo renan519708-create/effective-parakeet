@@ -248,6 +248,32 @@ class BinanceBroker:
                 return float(p["entryPrice"]), None
         return 0.0, None
 
+    def get_last_trade_price(self, symbol, since_ms=None):
+        """Returns (price, error) -- the average price of this
+        account's most recent REAL fill on `symbol` (optionally only
+        trades at/after `since_ms`), straight from Binance's own trade
+        record. Used when a position is found already flat before our
+        own close order gets a chance to run (confirmed live
+        2026-09-15: a fast adverse move on a volatile day -- possibly a
+        real liquidation -- closed a position before the engine's next
+        5-minute check; falling back to the strategy's own THEORETICAL
+        exit price in that case produced a real, plausible-looking but
+        completely wrong result, even the wrong sign, since the actual
+        market had already moved well past what the theoretical price
+        assumed). This is the authoritative source for what a symbol
+        actually closed at when no order response is available to ask
+        directly."""
+        params = {"symbol": symbol, "limit": 10}
+        if since_ms:
+            params["startTime"] = since_ms
+        data, err = self._signed_request("GET", "/fapi/v1/userTrades", params)
+        if err:
+            return None, err
+        if not data:
+            return None, "sem trades recentes para este simbolo"
+        last = max(data, key=lambda t: t["time"])
+        return float(last["price"]), None
+
     def set_leverage(self, symbol, leverage):
         """Sets the leverage used for a symbol's FUTURE orders -- Binance
         does not default new orders to 1x on its own; whatever leverage

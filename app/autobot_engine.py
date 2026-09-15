@@ -220,11 +220,27 @@ def _check_exit(app, position_id, testnet, encryption_key):
                 db.session.commit()
                 return
             # Prefer the close order's own real fill -- same rule the
-            # campaign engine already follows -- falling back to the
-            # theoretical EMA/stop price only when the exchange was
-            # already flat with no fill info to report (e.g. the entry
-            # order itself had failed earlier).
-            final_close_price = real_close_price or exit_price
+            # campaign engine already follows. If the exchange was
+            # ALREADY flat by the time we checked (a fast adverse move,
+            # possibly a real liquidation, closed it before this tick
+            # got here), _place_live_exit has no fill to report -- ask
+            # Binance's own trade history for the real last fill
+            # instead of trusting the strategy's THEORETICAL EMA/stop
+            # price, which can be badly wrong (even the wrong sign) once
+            # the real market has already moved well past what that
+            # theoretical value assumed. The theoretical exit_price is
+            # the last resort, only if even the real trade history is
+            # unavailable.
+            overridden_by_real_trade = False
+            if real_close_price is not None:
+                final_close_price = real_close_price
+            else:
+                last_trade_price, _trade_err = broker.get_last_trade_price(position.symbol, since_ms=position.entry_time)
+                if last_trade_price is not None:
+                    final_close_price = last_trade_price
+                    overridden_by_real_trade = True
+                else:
+                    final_close_price = exit_price
 
             # The leverage THIS position actually opened with, captured
             # at entry -- not whatever the account's leverage is set to
@@ -244,6 +260,15 @@ def _check_exit(app, position_id, testnet, encryption_key):
             # PnL below, matching _place_live_entry's own margin/
             # notional convention (notional = margin * leverage).
             raw_pct = price_roi_pct(position.direction.lower(), position.entry_price, final_close_price, 1)
+
+            # When the theoretical status/exit_price got overridden by
+            # the real trade history above, the strategy's own
+            # green/red/stopped label (decided against the theoretical
+            # price) can no longer be trusted either -- relabel from
+            # the REAL sign instead of showing e.g. "green" next to a
+            # real loss.
+            if overridden_by_real_trade:
+                status = "green" if raw_pct >= 0 else "red"
 
             position.status = status
             position.close_price = final_close_price
