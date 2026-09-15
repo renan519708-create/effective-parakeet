@@ -279,6 +279,15 @@ class AutoBotPosition(db.Model):
     max_drawdown_pct = db.Column(db.Float, nullable=False, default=0.0)
     allocated_usd = db.Column(db.Float, nullable=False)
     realized_pnl_usd = db.Column(db.Float, nullable=True)
+    # Leverage that was actually in effect when THIS position opened --
+    # captured once, at entry, and never re-read from live settings
+    # afterward. Confirmed live 2026-09-15: closing with the account's
+    # CURRENT AutoBotSettings.leverage (which may have changed since
+    # entry) silently recomputed realized_pnl_usd/displayed %% with the
+    # wrong leverage for any position spanning a leverage change.
+    # Nullable for rows created before this column existed -- callers
+    # fall back to current settings.leverage for those old rows only.
+    leverage = db.Column(db.Integer, nullable=True)
 
     user = db.relationship("User")
 

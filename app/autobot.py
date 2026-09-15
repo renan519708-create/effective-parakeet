@@ -152,8 +152,11 @@ def close_position(position_id):
         flash("A ordem de fechamento falhou -- a posicao pode continuar aberta na Binance. Confira o log de ordens e tente de novo.", "error")
         return redirect(url_for("autobot.dashboard"))
 
-    settings = AutoBotSettings.query.get(current_user.id)
-    leverage = settings.leverage if settings else 1
+    if position.leverage is not None:
+        leverage = position.leverage
+    else:
+        settings = AutoBotSettings.query.get(current_user.id)
+        leverage = settings.leverage if settings else 1
     # confirmed_flat with no fill price means the exchange was already
     # flat (nothing left to close, e.g. it was closed manually on
     # Binance itself) -- no real fill to compute a % move from, so

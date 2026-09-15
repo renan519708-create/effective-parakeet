@@ -226,8 +226,18 @@ def _check_exit(app, position_id, testnet, encryption_key):
             # order itself had failed earlier).
             final_close_price = real_close_price or exit_price
 
-            settings = AutoBotSettings.query.get(position.user_id)
-            leverage = settings.leverage if settings else 1
+            # The leverage THIS position actually opened with, captured
+            # at entry -- not whatever the account's leverage is set to
+            # NOW, which may have changed since (confirmed live
+            # 2026-09-15: closing with current settings silently
+            # recomputed the wrong $ PnL for a position that spanned a
+            # leverage change). Old rows predating this column fall
+            # back to current settings, same as before.
+            if position.leverage is not None:
+                leverage = position.leverage
+            else:
+                settings = AutoBotSettings.query.get(position.user_id)
+                leverage = settings.leverage if settings else 1
             # Raw (unleveraged) price-move %, recomputed from the two
             # real fill prices rather than trusting the theoretical
             # exit_price -- leverage is applied only for the dollar
@@ -286,6 +296,7 @@ def _check_entries_for_user(app, user_id, testnet, encryption_key, signals, pric
                 db.session.add(AutoBotPosition(
                     user_id=user_id, symbol=symbol, direction=direction, entry_price=fill_price,
                     entry_time=now_ms, status="open", allocated_usd=margin_usd,
+                    leverage=settings.leverage,
                 ))
                 open_count += 1
             db.session.commit()
