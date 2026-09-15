@@ -125,6 +125,36 @@ def dashboard():
                 "when": last_fail.created_at if last_fail else None,
             })
 
+    # Same idea, for a campaign that IS running but never actually got
+    # a real position on some (or all) symbols -- e.g. every entry
+    # attempt hit Binance's min-notional filter because the sliced
+    # margin was too small, or a leverage/margin-type call failed.
+    # "Entrada: -" in the table above already says something's missing;
+    # this says WHY, straight from the real error Binance returned,
+    # instead of the operator having to guess or dig through Render's
+    # worker logs (confirmed live 2026-09-15: a daily_composto campaign
+    # sat "active" for hours with every one of 53 symbols still showing
+    # "-", no visible reason anywhere on this page).
+    open_failures = []
+    if campaign and campaign.status == "active":
+        for s in campaign.symbols:
+            if live.get(s.symbol, {}).get("entry"):
+                continue  # has a real position, nothing to explain
+            last_fail = (
+                OrderLog.query.filter_by(symbol=s.symbol, order_type="open", status="failed")
+                .order_by(OrderLog.created_at.desc())
+                .first()
+            )
+            if not last_fail:
+                continue
+            fail_user = User.query.get(last_fail.user_id)
+            open_failures.append({
+                "symbol": s.symbol,
+                "email": fail_user.email if fail_user else f"user#{last_fail.user_id}",
+                "error": last_fail.error_message,
+                "when": last_fail.created_at,
+            })
+
     # Same "only count symbols with real trade evidence" rule for the
     # historical Resultado column -- CampaignSymbol.entry_price is
     # always set (a synthetic reference captured at campaign-start,
@@ -181,6 +211,7 @@ def dashboard():
         live=live,
         results=results,
         stuck_reasons=stuck_reasons,
+        open_failures=open_failures,
         daily_settings=daily_settings,
         halted_followers=halted_followers,
     )

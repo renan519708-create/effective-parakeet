@@ -35,6 +35,16 @@
       {% endfor %}
       </tbody>
     </table></div>
+    {% if open_failures %}
+      <div class="flash flash-error" style="margin-bottom:14px;">
+        <strong>{{ open_failures|length }} símbolo(s) sem posição real aberta -- motivo da última tentativa:</strong>
+        <ul style="margin:6px 0 0 18px; padding:0;">
+        {% for r in open_failures %}
+          <li>{{ r.symbol }} ({{ r.email }}): {{ r.error }}</li>
+        {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
     {% if campaign.status == 'stopping' %}
       {% if stuck_reasons %}
         <div class="flash flash-error" style="margin-bottom:12px;">
