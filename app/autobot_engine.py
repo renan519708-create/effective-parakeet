@@ -299,7 +299,20 @@ def _check_entries_for_user(app, user_id, testnet, encryption_key, signals, pric
             if not broker:
                 return
 
-            margin_usd = settings.capital_usd / NUM_SLOTS
+            # Compounding, per explicit request 2026-09-15: 10% of the
+            # account's REAL current Binance balance per entry (1 /
+            # NUM_SLOTS), not the fixed "Capital total" setting -- grows
+            # or shrinks with realized profit/loss, same real-balance
+            # convention Diária Composta already uses in
+            # app/engine.py's Case A. settings.capital_usd is no longer
+            # read for sizing (still shown/editable in the UI, but has
+            # no effect on entry size until/unless it's repurposed as a
+            # cap the way daily_composto_capital_usd is).
+            balance, bal_err = broker.get_account_balance()
+            if bal_err:
+                _log_order(user_id, "-", "-", None, "open", None, "failed", f"saldo indisponivel: {bal_err}")
+                return
+            margin_usd = balance / NUM_SLOTS
             for symbol, direction in signals.items():
                 if open_count >= NUM_SLOTS or stops_today >= MAX_DAILY_STOPS:
                     break

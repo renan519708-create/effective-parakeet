@@ -29,13 +29,12 @@
 
 <div class="panel">
   <div class="panel-title">Capital e alavancagem</div>
-  <p class="sub">O capital total é dividido em {{ num_slots }} fatias iguais -- cada entrada nova usa uma fatia (ex.: $100 de capital = $10 por entrada, até {{ num_slots }} entradas simultâneas). Não é reinvestimento automático: o valor por fatia só muda quando você edita o capital aqui.</p>
+  <p class="sub">Cada entrada nova usa 10% do saldo REAL atual da sua conta na Binance (1/{{ num_slots }}, até {{ num_slots }} entradas simultâneas) -- é reinvestimento automático: o valor por entrada cresce ou encolhe sozinho junto com o resultado acumulado, sem precisar editar nada aqui.</p>
   <form method="post" action="{{ url_for('autobot.save_settings') }}">
     <div class="row2">
-      <div class="field"><span class="field-label">Capital total (USD)</span><input type="number" step="1" min="50" name="capital_usd" value="{{ settings.capital_usd }}"></div>
+      <div class="field"><span class="field-label">Capital total (USD) -- não usado no cálculo da entrada, ver acima</span><input type="number" step="1" min="50" name="capital_usd" value="{{ settings.capital_usd }}"></div>
       <div class="field"><span class="field-label">Alavancagem (x)</span><input type="number" name="leverage" value="{{ settings.leverage }}" min="1" max="20"></div>
     </div>
-    <p class="sub">Valor por entrada com a configuração atual: <strong>${{ '%.2f'|format(settings.capital_usd / num_slots) }}</strong> de margem (~${{ '%.2f'|format(settings.capital_usd / num_slots * settings.leverage) }} de exposição a {{ settings.leverage }}x).</p>
     <button class="btn" type="submit">Salvar configurações</button>
   </form>
 </div>
