@@ -26,7 +26,7 @@ import time
 
 import requests
 
-from app.binance_broker import TESTNET_BASE_URL, MAINNET_BASE_URL
+from app.binance_broker import TESTNET_BASE_URL, MAINNET_BASE_URL, get_exchange_info
 
 STABLE_EXCLUDE = {
     "usdt", "usdc", "dai", "busd", "tusd", "fdusd", "usde", "usds",
@@ -47,9 +47,14 @@ def _base_url(testnet):
 
 
 def fetch_binance_futures_symbols(testnet):
-    resp = requests.get(f"{_base_url(testnet)}/fapi/v1/exchangeInfo", timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
+    """Reads through binance_broker's shared, process-wide exchangeInfo
+    cache (5-minute TTL) instead of a fresh request every call --
+    confirmed live 2026-09-15: this same ~1-2MB endpoint, uncached and
+    called from several different features (campaign search, Diária
+    Composta's universe resolution, Auto-bot), is what got the app's
+    own IP rate-limited by Binance (429/418 errors) in the first
+    place."""
+    data = get_exchange_info(_base_url(testnet))
     return {
         s["symbol"] for s in data["symbols"]
         if s.get("contractType") == "PERPETUAL" and s.get("status") == "TRADING" and s.get("quoteAsset") == "USDT"

@@ -11,6 +11,7 @@ what decides when to call into it.
 import hashlib
 import hmac
 import math
+import threading
 import time
 import urllib.parse
 
@@ -18,6 +19,44 @@ import requests
 
 TESTNET_BASE_URL = "https://demo-fapi.binance.com"
 MAINNET_BASE_URL = "https://fapi.binance.com"
+
+# Shared, process-wide cache for GET /fapi/v1/exchangeInfo -- a ~1-2MB
+# response listing every symbol's trading rules, which rarely change.
+# Confirmed live 2026-09-15: every BinanceBroker instance had its OWN
+# cache (self._symbol_filters_cache below), reset on every fresh
+# instance (a new one is created per engine tick per account), AND a
+# failed fetch cached nothing at all -- so one early 429 inside a
+# single Case A pass (opening a multi-symbol campaign) cascaded into a
+# fresh exchangeInfo request for EVERY remaining symbol in that same
+# loop (up to 53 in a row for Diária Composta), which is exactly the
+# kind of burst that gets an IP rate-limited by Binance in the first
+# place. This cache is keyed by base_url (testnet/mainnet kept
+# separate) and shared across every thread, every BinanceBroker
+# instance, and every feature in this app (campaign engine, universe
+# search, Auto-bot) -- a 429/other failure is NOT cached, so the next
+# call retries normally, but a SUCCESS is reused for
+# EXCHANGE_INFO_TTL_SECONDS regardless of who asks.
+_exchange_info_cache = {}  # base_url -> (fetched_at_monotonic, data)
+_exchange_info_lock = threading.Lock()
+EXCHANGE_INFO_TTL_SECONDS = 300
+
+
+def get_exchange_info(base_url):
+    """Returns the parsed exchangeInfo JSON for this base_url, cached
+    process-wide for EXCHANGE_INFO_TTL_SECONDS. Raises
+    requests.RequestException (including a non-2xx via raise_for_status)
+    on a fresh-fetch failure -- callers already know how to handle
+    that; a cache hit never raises."""
+    with _exchange_info_lock:
+        cached = _exchange_info_cache.get(base_url)
+        if cached and (time.monotonic() - cached[0]) < EXCHANGE_INFO_TTL_SECONDS:
+            return cached[1]
+    resp = requests.get(f"{base_url}/fapi/v1/exchangeInfo", timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    with _exchange_info_lock:
+        _exchange_info_cache[base_url] = (time.monotonic(), data)
+    return data
 
 
 def sign_query(secret, params):
@@ -107,12 +146,15 @@ class BinanceBroker:
     def get_symbol_filters(self, symbol):
         """Fetches (and caches) exchangeInfo's LOT_SIZE / MIN_NOTIONAL
         filters for one symbol -- needed to size an order Binance will
-        actually accept."""
+        actually accept. Reads through the shared, process-wide
+        exchangeInfo cache (get_exchange_info above) -- not just this
+        one broker instance's own _symbol_filters_cache -- so a burst of
+        many symbols in one Case A pass makes at most one real HTTP call
+        between them, not one per symbol."""
         if symbol in self._symbol_filters_cache:
             return self._symbol_filters_cache[symbol], None
         try:
-            resp = requests.get(f"{self.base_url}/fapi/v1/exchangeInfo", timeout=10)
-            data = resp.json()
+            data = get_exchange_info(self.base_url)
         except requests.RequestException as e:
             return None, str(e)
         for s in data.get("symbols", []):
