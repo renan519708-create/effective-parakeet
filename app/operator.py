@@ -442,3 +442,26 @@ def reactivate_daily_composto(user_id):
     db.session.commit()
     flash("Conta reativada -- volta a participar a partir do proximo dia.", "success")
     return redirect(url_for("operator.dashboard"))
+
+
+@operator_bp.route("/campanha/diaria/minha-config", methods=["POST"])
+@operator_required
+def save_my_daily_composto_settings():
+    """Shortcut so whoever is both operator and a follower (the common
+    case today) can set their own leverage/capital cap for Diária
+    Composta right here, without leaving this page -- these are still
+    genuinely per-follower fields on FollowerSettings (app/follower.py's
+    save_settings is the general-purpose route, used by any OTHER
+    follower who isn't an operator and only sees "Minha conta"), this
+    is just a second, more convenient entry point onto the SAME row for
+    whoever can see this panel."""
+    settings = current_user.settings
+    try:
+        settings.leverage = max(1, int(request.form.get("leverage", settings.leverage)))
+        settings.daily_composto_capital_usd = max(0.0, float(request.form.get("daily_composto_capital_usd", settings.daily_composto_capital_usd)))
+    except ValueError:
+        flash("Valores invalidos.", "error")
+        return redirect(url_for("operator.dashboard"))
+    db.session.commit()
+    flash("Configuracoes da sua conta pra Diaria Composta salvas.", "success")
+    return redirect(url_for("operator.dashboard"))

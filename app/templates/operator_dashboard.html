@@ -95,7 +95,20 @@
     Status: <span class="status-tag">{{ 'ligada' if daily_settings.enabled else 'desligada' }}</span> &middot;
     Stop por operação: {{ daily_settings.stop_pct }}%
   </p>
-  <p class="sub">Abre sozinha às 05:15 e fecha às 21:00 (Brasília) todo dia, sempre comprada em todas as moedas do universo fixo, dividindo o saldo real de cada seguidor igualmente entre elas -- reusa "Seguir operações" de Minha conta, os mesmos seguidores da campanha manual. Enquanto ligada, não dá pra também rodar uma campanha manual Long/Short (usam a mesma vaga).</p>
+  <p class="sub">Abre sozinha às 05:15 e fecha às 21:00 (Brasília) todo dia, sempre comprada em todas as moedas do universo fixo, dividindo o saldo (ou o teto abaixo) de cada seguidor igualmente entre elas -- reusa "Seguir operações" de Minha conta, os mesmos seguidores da campanha manual. Enquanto ligada, não dá pra também rodar uma campanha manual Long/Short (usam a mesma vaga).</p>
+
+  <div class="panel" style="background:transparent; border:1px dashed var(--border, #333); margin:12px 0;">
+    <div class="panel-title" style="font-size:12px;">Sua conta nesta estratégia</div>
+    <p class="sub">Alavancagem e capital são por seguidor -- isto edita só a sua própria conta ({{ current_user.email }}). Lembre de também deixar "Seguir operações" ligado em <a href="{{ url_for('follower.dashboard') }}">Minha conta</a>, senão você mesmo não participa.</p>
+    <form method="post" action="{{ url_for('operator.save_my_daily_composto_settings') }}">
+      <div class="row2">
+        <div class="field"><span class="field-label">Alavancagem (x)</span><input type="number" name="leverage" value="{{ current_user.settings.leverage if current_user.settings else 1 }}" min="1" max="125"></div>
+        <div class="field"><span class="field-label">Capital total usado (USD, 0 = sem limite)</span><input type="number" step="1" min="0" name="daily_composto_capital_usd" value="{{ current_user.settings.daily_composto_capital_usd if current_user.settings else 0 }}"></div>
+      </div>
+      <button class="btn" type="submit">Salvar minha conta</button>
+    </form>
+  </div>
+
   {% if daily_settings.enabled %}
     <form method="post" action="{{ url_for('operator.stop_daily_composto') }}">
       <button class="btn btn-stop" type="submit">Desligar Diária Composta</button>
