@@ -248,7 +248,7 @@ class BinanceBroker:
                 return float(p["entryPrice"]), None
         return 0.0, None
 
-    def get_last_trade_price(self, symbol, since_ms=None):
+    def get_last_trade_price(self, symbol, since_ms=None, until_ms=None):
         """Returns (price, error) -- the average price of this
         account's most recent REAL fill on `symbol` (optionally only
         trades at/after `since_ms`), straight from Binance's own trade
@@ -262,10 +262,22 @@ class BinanceBroker:
         market had already moved well past what the theoretical price
         assumed). This is the authoritative source for what a symbol
         actually closed at when no order response is available to ask
-        directly."""
+        directly.
+
+        `until_ms` bounds the window on the other side -- without it, a
+        symbol traded again after this position closed (very common:
+        Kairi re-signals the same symbols constantly) can make this
+        return a LATER, unrelated position's fill instead of this
+        one's own close. Pass it (e.g. recorded close_time + a small
+        buffer) whenever recalculating many historical rows in bulk,
+        where that mixup is likely; the single-position "Recalcular"
+        button leaves it unset since a human is checking one specific,
+        recently-closed row."""
         params = {"symbol": symbol, "limit": 10}
         if since_ms:
             params["startTime"] = since_ms
+        if until_ms:
+            params["endTime"] = until_ms
         data, err = self._signed_request("GET", "/fapi/v1/userTrades", params)
         if err:
             return None, err

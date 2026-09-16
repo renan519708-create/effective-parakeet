@@ -261,6 +261,28 @@ def clear_history():
     return redirect(url_for("autobot.dashboard"))
 
 
+def _recalculate_from_real_trade(broker, position, default_leverage, until_ms=None):
+    """Shared by the single-position and bulk 'Recalcular' actions:
+    re-pulls one closed position's real fill from Binance's own trade
+    history and overwrites close_price/result_pct/realized_pnl_usd/
+    status. Returns (ok, message). `until_ms` bounds the search window
+    on the Binance side (see get_last_trade_price's docstring) -- pass
+    it in bulk runs so a symbol traded again later doesn't get
+    mistaken for this position's own close."""
+    real_price, trade_err = broker.get_last_trade_price(position.symbol, since_ms=position.entry_time, until_ms=until_ms)
+    if real_price is None:
+        return False, f"{position.symbol}: {trade_err}"
+
+    leverage = position.leverage if position.leverage is not None else default_leverage
+    raw_pct = price_roi_pct(position.direction.lower(), position.entry_price, real_price, 1)
+
+    position.close_price = real_price
+    position.result_pct = raw_pct
+    position.realized_pnl_usd = position.allocated_usd * leverage * (raw_pct / 100)
+    position.status = "green" if raw_pct >= 0 else "red"
+    return True, f"{position.symbol}: {raw_pct:+.2f}% (${position.realized_pnl_usd:+.2f})"
+
+
 @autobot_bp.route("/posicao/<int:position_id>/recalcular", methods=["POST"])
 @login_required
 def recalculate_position(position_id):
@@ -287,18 +309,58 @@ def recalculate_position(position_id):
         flash(f"Nao foi possivel recalcular: {err}", "error")
         return redirect(url_for("autobot.dashboard"))
 
-    real_price, trade_err = broker.get_last_trade_price(position.symbol, since_ms=position.entry_time)
-    if real_price is None:
-        flash(f"Nao encontrei um trade real da Binance pra recalcular: {trade_err}", "error")
+    settings = AutoBotSettings.query.get(current_user.id)
+    ok, msg = _recalculate_from_real_trade(broker, position, settings.leverage if settings else 1)
+    if not ok:
+        flash(f"Nao encontrei um trade real da Binance pra recalcular: {msg}", "error")
+        return redirect(url_for("autobot.dashboard"))
+    db.session.commit()
+    flash(f"Recalculado com o preco real da Binance -- {msg}.", "success")
+    return redirect(url_for("autobot.dashboard"))
+
+
+@autobot_bp.route("/historico/recalcular-tudo", methods=["POST"])
+@login_required
+def recalculate_all():
+    """Bulk version of 'Recalcular' -- runs it over EVERY closed
+    position in this account's history (not just the 50 shown), so the
+    'Saldo total'/'PnL acumulado' scoreboard reflects Binance's real
+    trade data end to end instead of whatever each row happened to
+    record at close time (including rows closed before this session's
+    price-accuracy fixes -- avgPrice truthy-string bug, missing
+    real-entry-price check, theoretical-price fallback on an
+    already-flat position). Bounds each lookup to
+    [entry_time, close_time + 5min] via until_ms so a symbol traded
+    again afterwards (common -- Kairi re-signals constantly) can't get
+    mistaken for this row's own close, which the single-row button
+    doesn't need to worry about since a human is checking one specific
+    row they just saw."""
+    testnet = current_app.config["AUTOBOT_TESTNET"]
+    encryption_key = current_app.config["ENCRYPTION_KEY"]
+    broker, err = _build_autobot_broker(current_user.id, encryption_key, testnet)
+    if not broker:
+        flash(f"Nao foi possivel recalcular: {err}", "error")
         return redirect(url_for("autobot.dashboard"))
 
-    leverage = position.leverage if position.leverage is not None else (AutoBotSettings.query.get(current_user.id).leverage or 1)
-    raw_pct = price_roi_pct(position.direction.lower(), position.entry_price, real_price, 1)
+    settings = AutoBotSettings.query.get(current_user.id)
+    default_leverage = settings.leverage if settings else 1
+    positions = AutoBotPosition.query.filter(
+        AutoBotPosition.user_id == current_user.id,
+        AutoBotPosition.status != "open",
+    ).all()
 
-    position.close_price = real_price
-    position.result_pct = raw_pct
-    position.realized_pnl_usd = position.allocated_usd * leverage * (raw_pct / 100)
-    position.status = "green" if raw_pct >= 0 else "red"
+    updated, failed = 0, []
+    for position in positions:
+        until_ms = (position.close_time + 5 * 60 * 1000) if position.close_time else None
+        ok, msg = _recalculate_from_real_trade(broker, position, default_leverage, until_ms=until_ms)
+        if ok:
+            updated += 1
+        else:
+            failed.append(msg)
     db.session.commit()
-    flash(f"Recalculado com o preco real da Binance -- {position.symbol}: {raw_pct:+.2f}% (${position.realized_pnl_usd:+.2f}).", "success")
+
+    if failed:
+        flash(f"Recalculadas {updated} de {len(positions)} operacoes. Sem trade real encontrado para: {'; '.join(failed[:10])}{' ...' if len(failed) > 10 else ''}.", "error")
+    else:
+        flash(f"Recalculadas {updated} operacoes com dados reais da Binance.", "success")
     return redirect(url_for("autobot.dashboard"))
