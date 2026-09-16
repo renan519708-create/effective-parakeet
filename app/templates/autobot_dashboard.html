@@ -98,8 +98,9 @@
 
   <div class="metrics-grid">
     <div class="metric-card">
-      <div class="metric-label">Saldo total</div>
+      <div class="metric-label">Saldo total{{ '' if saldo_is_real else ' (estimado)' }}</div>
       <div class="metric-value">${{ '%.2f'|format(saldo_total) }}</div>
+      {% if not saldo_is_real %}<div class="field-hint">Sem chave valida pra consultar o saldo real na Binance -- usando Capital total + PnL como estimativa.</div>{% endif %}
     </div>
     <div class="metric-card">
       <div class="metric-label">Resultado acumulado</div>
