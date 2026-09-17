@@ -364,6 +364,8 @@ def export_history():
     times in Brasília local time (same convention as the rest of the
     app's `brasilia` filter) since that's what a screenshot from the
     Binance app itself would also show."""
+    settings = AutoBotSettings.query.get(current_user.id)
+    fallback_leverage = (settings.leverage if settings else None) or 1
     positions = (
         AutoBotPosition.query
         .filter(AutoBotPosition.user_id == current_user.id, AutoBotPosition.status != "open")
@@ -387,8 +389,27 @@ def export_history():
         "margem_usd", "pnl_usd",
     ])
     for p in positions:
-        lev = p.leverage or 1
-        roi = (p.result_pct * lev) if p.result_pct is not None else None
+        # "alavancagem" shown is p.leverage if this row has it, else the
+        # account's CURRENT setting -- same fallback the dashboard
+        # template uses, so this column always matches what's on
+        # screen. But roi_alavancado_pct is derived straight from the
+        # stored realized_pnl_usd/allocated_usd (what actually
+        # happened), NOT recomputed as result_pct * that fallback
+        # leverage -- a row closed before AutoBotPosition.leverage
+        # existed (p.leverage is None) can have a realized_pnl_usd that
+        # used a DIFFERENT real leverage than whatever the account is
+        # set to today, so result_pct * current-settings.leverage would
+        # silently disagree with the real $ result on those legacy
+        # rows (caught 2026-09-17 comparing this export against itself:
+        # a leverage=1 fallback made roi_alavancado_pct read ~3.28% on
+        # a row whose real pnl_usd/allocated_usd was ~19.67%).
+        lev = p.leverage or fallback_leverage
+        if p.realized_pnl_usd is not None and p.allocated_usd:
+            roi = p.realized_pnl_usd / p.allocated_usd * 100
+        elif p.result_pct is not None:
+            roi = p.result_pct * lev
+        else:
+            roi = None
         writer.writerow([
             p.symbol,
             p.direction,

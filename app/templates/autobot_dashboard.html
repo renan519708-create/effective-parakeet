@@ -133,7 +133,18 @@
     <tbody>
     {% for p in closed_positions %}
       {% set lev = p.leverage or settings.leverage %}
-      {% set roi = (p.result_pct * lev) if p.result_pct is not none else none %}
+      {# Derived from the real stored PnL, not result_pct * lev: a row
+         closed before AutoBotPosition.leverage existed (p.leverage
+         None) falls back to settings.leverage, but that's the
+         CURRENT setting -- if the user changes it later, every such
+         legacy row would silently show a wrong % here (same class of
+         bug as the "leverage changed retroactively" fix earlier this
+         session, now for display, not realized_pnl_usd itself). The
+         real leverage actually used is already baked into
+         realized_pnl_usd/allocated_usd, so read it back from there
+         instead of trusting a leverage value that may not be the one
+         this row was actually opened with. #}
+      {% set roi = (p.realized_pnl_usd / p.allocated_usd * 100) if (p.realized_pnl_usd is not none and p.allocated_usd) else ((p.result_pct * lev) if p.result_pct is not none else none) %}
       <tr>
         <td>{{ p.symbol }}</td>
         <td><span class="side-tag {{ 'side-long' if p.direction == 'LONG' else 'side-short' }}">{{ p.direction }}</span></td>
