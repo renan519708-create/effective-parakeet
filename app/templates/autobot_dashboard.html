@@ -121,6 +121,7 @@
   </div>
 
   {% if closed_positions %}
+    <a href="{{ url_for('autobot.export_history') }}" class="btn" style="margin-bottom:12px; display:inline-block; text-decoration:none;">Exportar CSV (todo o histórico)</a>
     <form method="post" action="{{ url_for('autobot.recalculate_all') }}" onsubmit="return confirm('Recalcular TODAS as operacoes encerradas com o preco real da Binance? Pode demorar alguns segundos (uma consulta por operacao). Sobrescreve resultado/% /PnL de cada linha.');" style="margin-bottom:12px; display:inline;">
       <button class="btn" type="submit">Recalcular tudo com dados reais</button>
     </form>

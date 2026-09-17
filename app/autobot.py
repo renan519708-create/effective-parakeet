@@ -5,9 +5,11 @@ management (credential, capital/leverage, on/off, manual close); every
 real order is placed by the engine's own background loop, same
 separation of concerns as operator.py/follower.py vs engine.py."""
 
+import csv
+import io
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
 from app.autobot_engine import KAIRI_LOWER, KAIRI_STOP_PCT, KAIRI_UPPER, NUM_SLOTS, _build_autobot_broker, _place_live_exit, get_allocated_balance
@@ -16,6 +18,12 @@ from app.crypto import encrypt_secret
 from app.engine import price_roi_pct
 from app.extensions import db
 from app.models import AutoBotCredential, AutoBotPosition, AutoBotSettings, OrderLog
+
+# Same fixed Brasília offset app/__init__.py's `brasilia` Jinja filter
+# uses -- duplicated as a plain constant (not imported from app/
+# __init__.py) to avoid importing the app package's own __init__
+# module from inside one of the blueprints it registers.
+_BRASILIA_TZ = timezone(timedelta(hours=-3))
 
 autobot_bp = Blueprint("autobot", __name__, url_prefix="/autobot")
 
@@ -344,3 +352,61 @@ def recalculate_all():
     else:
         flash(f"Recalculadas {updated} operacoes com dados reais da Binance.", "success")
     return redirect(url_for("autobot.dashboard"))
+
+
+@autobot_bp.route("/historico/exportar")
+@login_required
+def export_history():
+    """CSV with every CLOSED position for this account (not just the 50
+    shown on the dashboard) -- so the user can send it over chat for a
+    row-by-row comparison against Binance's own history, instead of
+    typing/screenshotting individual trades one at a time. Entry/close
+    times in Brasília local time (same convention as the rest of the
+    app's `brasilia` filter) since that's what a screenshot from the
+    Binance app itself would also show."""
+    positions = (
+        AutoBotPosition.query
+        .filter(AutoBotPosition.user_id == current_user.id, AutoBotPosition.status != "open")
+        .order_by(AutoBotPosition.closed_at.asc())
+        .all()
+    )
+
+    def _fmt_brasilia(value):
+        if value is None:
+            return ""
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(_BRASILIA_TZ).strftime("%d/%m/%Y %H:%M:%S")
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([
+        "simbolo", "direcao", "entrada_preco", "saida_preco",
+        "aberta_em_brasilia", "fechada_em_brasilia", "status",
+        "resultado_pct_bruto", "alavancagem", "roi_alavancado_pct",
+        "margem_usd", "pnl_usd",
+    ])
+    for p in positions:
+        lev = p.leverage or 1
+        roi = (p.result_pct * lev) if p.result_pct is not None else None
+        writer.writerow([
+            p.symbol,
+            p.direction,
+            p.entry_price,
+            p.close_price if p.close_price is not None else "",
+            _fmt_brasilia(p.opened_at),
+            _fmt_brasilia(p.closed_at),
+            p.status,
+            f"{p.result_pct:.4f}" if p.result_pct is not None else "",
+            lev,
+            f"{roi:.4f}" if roi is not None else "",
+            f"{p.allocated_usd:.2f}",
+            f"{(p.realized_pnl_usd or 0):.2f}",
+        ])
+
+    filename = f"autobot_historico_{datetime.now(_BRASILIA_TZ).strftime('%Y%m%d_%H%M')}.csv"
+    return Response(
+        buffer.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
