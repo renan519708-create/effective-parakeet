@@ -46,6 +46,18 @@ NUM_SLOTS = 20
 CANDLE_LOOKBACK = KAIRI_LENGTH + 10
 UNIVERSE_TOP_N = 50
 ENGINE_MAX_WORKERS = 10
+# Circuit breaker added 2026-09-17 after a real incident: AKEUSDT
+# flash-crashed ~32% in 10 minutes, decoupled from BTC (which was flat
+# the whole time -- confirmed by correlating the loss cluster against
+# BTC candles), and the Kairi signal -- computed off the CURRENT,
+# still-forming 1h candle -- re-triggered a fresh LONG 2 seconds after
+# the first one stopped out, catching the same falling knife twice
+# (-$5.32 then -$3.63). A symbol whose own current-hour candle has
+# already moved this much is treated as "mid-event" and skipped for
+# new entries this tick, regardless of what the Kairi signal says --
+# independent of NUM_SLOTS/margin sizing, checked per-symbol before
+# ever placing an order.
+MAX_RECENT_VOLATILITY_PCT = 15.0
 
 
 def get_allocated_balance(user_id):
@@ -78,6 +90,22 @@ def _zone_for(value, upper, lower):
     if value <= lower:
         return "oversold"
     return "neutral"
+
+
+def _recent_volatility_pct(forming_candle):
+    """How far `symbol` has already ranged within its CURRENT,
+    still-forming 1h candle, as a percentage of that candle's open --
+    cheap proxy for "is this symbol mid-flash-crash/pump right now",
+    computed from data already fetched for the Kairi signal itself (no
+    extra API call). None/0 if there's no forming candle or its open
+    is 0 (shouldn't happen for a real market, but never divide by
+    zero)."""
+    if not forming_candle:
+        return 0.0
+    open_price = forming_candle.get("open")
+    if not open_price:
+        return 0.0
+    return (forming_candle["high"] - forming_candle["low"]) / open_price * 100
 
 
 def _build_autobot_broker(user_id, encryption_key, testnet):
@@ -312,7 +340,7 @@ def _check_exit(app, position_id, testnet, encryption_key):
             app.logger.error(f"[autobot] erro fechando posicao {position_id}: {e}")
 
 
-def _check_entries_for_user(app, user_id, testnet, encryption_key, signals, prices, now_ms):
+def _check_entries_for_user(app, user_id, testnet, encryption_key, signals, prices, now_ms, volatility=None):
     with app.app_context():
         try:
             settings = AutoBotSettings.query.get(user_id)
@@ -355,6 +383,10 @@ def _check_entries_for_user(app, user_id, testnet, encryption_key, signals, pric
                 price = prices.get(symbol)
                 if not price:
                     continue
+                recent_vol = (volatility or {}).get(symbol, 0.0)
+                if recent_vol >= MAX_RECENT_VOLATILITY_PCT:
+                    _log_order(user_id, symbol, direction, None, "open", None, "failed", f"pulado: {symbol} ja se moveu {recent_vol:.1f}% na vela atual (>= {MAX_RECENT_VOLATILITY_PCT:.0f}%, possivel flash crash/pump)")
+                    continue
 
                 fill_price, qty = _place_live_entry(broker, symbol, direction, margin_usd, price, settings.leverage, user_id)
                 if fill_price is None:
@@ -393,6 +425,7 @@ def run_tick(app):
 
     signals = {}
     prices = {}
+    volatility = {}
     with app.app_context():
         for symbol in symbols:
             candles = get_klines(symbol, "1h", CANDLE_LOOKBACK, testnet)
@@ -401,6 +434,7 @@ def run_tick(app):
             if not seq:
                 continue
             prices[symbol] = seq[-1]["close"]
+            volatility[symbol] = _recent_volatility_pct(forming)
             if symbol in universe:
                 direction = _update_symbol_signal(symbol, seq)
                 if direction:
@@ -420,7 +454,7 @@ def run_tick(app):
             user_ids = [u.id for u in User.query.join(AutoBotSettings).filter(AutoBotSettings.enabled.is_(True)).all()]
         with concurrent.futures.ThreadPoolExecutor(max_workers=ENGINE_MAX_WORKERS) as pool:
             futures = [
-                pool.submit(_check_entries_for_user, app, uid, testnet, encryption_key, signals, prices, now_ms)
+                pool.submit(_check_entries_for_user, app, uid, testnet, encryption_key, signals, prices, now_ms, volatility)
                 for uid in user_ids
             ]
             concurrent.futures.wait(futures)
