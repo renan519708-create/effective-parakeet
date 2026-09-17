@@ -29,12 +29,13 @@
 
 <div class="panel">
   <div class="panel-title">Capital e alavancagem</div>
-  <p class="sub">Cada entrada nova usa 10% do saldo REAL atual da sua conta na Binance (1/{{ num_slots }}, até {{ num_slots }} entradas simultâneas) -- é reinvestimento automático: o valor por entrada cresce ou encolhe sozinho junto com o resultado acumulado, sem precisar editar nada aqui.</p>
+  <p class="sub">Cada entrada nova usa 10% do capital ALOCADO ao Auto-bot (1/{{ num_slots }}, até {{ num_slots }} entradas simultâneas) -- é reinvestimento automático: esse capital cresce ou encolhe sozinho com o resultado acumulado do bot, sem precisar editar nada aqui. Não é o saldo real da sua conta inteira na Binance -- só a fatia que você dedica abaixo, já que a mesma conta também é usada pra outras coisas.</p>
   <form method="post" action="{{ url_for('autobot.save_settings') }}">
     <div class="row2">
-      <div class="field"><span class="field-label">Capital total (USD) -- não usado no cálculo da entrada, ver acima</span><input type="number" step="1" min="50" name="capital_usd" value="{{ settings.capital_usd }}"></div>
+      <div class="field"><span class="field-label">Capital dedicado ao Auto-bot (USD)</span><input type="number" step="1" min="50" name="capital_usd" value="{{ settings.capital_usd }}"></div>
       <div class="field"><span class="field-label">Alavancagem (x)</span><input type="number" name="leverage" value="{{ settings.leverage }}" min="1" max="20"></div>
     </div>
+    <p class="sub">Editar esse valor muda o capital alocado imediatamente (soma/subtrai do que o bot já rendeu) -- use só se você adicionar ou tirar dinheiro dedicado ao Auto-bot nessa conta, não pra "resetar" o resultado acumulado.</p>
     <button class="btn" type="submit">Salvar configurações</button>
   </form>
 </div>
@@ -98,9 +99,8 @@
 
   <div class="metrics-grid">
     <div class="metric-card">
-      <div class="metric-label">Saldo total{{ '' if saldo_is_real else ' (estimado)' }}</div>
+      <div class="metric-label">Saldo total (alocado ao Auto-bot)</div>
       <div class="metric-value">${{ '%.2f'|format(saldo_total) }}</div>
-      {% if not saldo_is_real %}<div class="field-hint">Sem chave valida pra consultar o saldo real na Binance -- usando Capital total + PnL como estimativa.</div>{% endif %}
     </div>
     <div class="metric-card">
       <div class="metric-label">Resultado acumulado</div>

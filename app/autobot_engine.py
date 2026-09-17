@@ -42,6 +42,30 @@ UNIVERSE_TOP_N = 50
 ENGINE_MAX_WORKERS = 10
 
 
+def get_allocated_balance(user_id):
+    """The Auto-bot's OWN virtual balance for this user: capital_usd
+    (the amount they set aside for the bot -- treated as a fixed
+    starting point, not a live knob) plus every closed position's real
+    realized PnL to date. Deliberately NOT broker.get_account_balance()
+    (the account's real total Binance balance): confirmed live
+    2026-09-17 that this Binance account also holds capital used for
+    other things (other strategies/personal use, same wallet), so the
+    real total overstates what's actually meant for this strategy --
+    using it for sizing risks money the user never allocated to the
+    bot, and using it for the dashboard scoreboard shows a balance
+    that isn't "the bot's". This virtual balance compounds correctly
+    off the bot's OWN results without being polluted by anything else
+    happening on the same account. Used both by _check_entries_for_user
+    (sizing) and app/autobot.py's dashboard (scoreboard) so the two
+    stay consistent with each other."""
+    settings = AutoBotSettings.query.get(user_id)
+    base = settings.capital_usd if settings else 0.0
+    total_realized_pnl = db.session.query(db.func.coalesce(db.func.sum(AutoBotPosition.realized_pnl_usd), 0.0)).filter(
+        AutoBotPosition.user_id == user_id, AutoBotPosition.status != "open",
+    ).scalar()
+    return base + total_realized_pnl
+
+
 def _zone_for(value, upper, lower):
     if value >= upper:
         return "overbought"
@@ -300,19 +324,20 @@ def _check_entries_for_user(app, user_id, testnet, encryption_key, signals, pric
                 return
 
             # Compounding, per explicit request 2026-09-15: 10% of the
-            # account's REAL current Binance balance per entry (1 /
-            # NUM_SLOTS), not the fixed "Capital total" setting -- grows
-            # or shrinks with realized profit/loss, same real-balance
-            # convention Diária Composta already uses in
-            # app/engine.py's Case A. settings.capital_usd is no longer
-            # read for sizing (still shown/editable in the UI, but has
-            # no effect on entry size until/unless it's repurposed as a
-            # cap the way daily_composto_capital_usd is).
-            balance, bal_err = broker.get_account_balance()
-            if bal_err:
-                _log_order(user_id, "-", "-", None, "open", None, "failed", f"saldo indisponivel: {bal_err}")
+            # Auto-bot's OWN allocated balance per entry (1 / NUM_SLOTS)
+            # -- grows or shrinks with realized profit/loss.
+            # Deliberately get_allocated_balance() (capital_usd + this
+            # bot's own realized PnL), NOT broker.get_account_balance():
+            # that was tried first but corrected 2026-09-17 -- this
+            # Binance account also holds capital for other things on
+            # the same wallet, so the real total balance would size
+            # entries against money never allocated to this strategy.
+            # See get_allocated_balance's docstring.
+            allocated = get_allocated_balance(user_id)
+            if allocated <= 0:
+                _log_order(user_id, "-", "-", None, "open", None, "failed", f"capital alocado esgotado (${allocated:.2f})")
                 return
-            margin_usd = balance / NUM_SLOTS
+            margin_usd = allocated / NUM_SLOTS
             for symbol, direction in signals.items():
                 if open_count >= NUM_SLOTS or stops_today >= MAX_DAILY_STOPS:
                     break

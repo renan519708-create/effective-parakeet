@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
-from app.autobot_engine import KAIRI_LOWER, KAIRI_STOP_PCT, KAIRI_UPPER, NUM_SLOTS, _build_autobot_broker, _place_live_exit
+from app.autobot_engine import KAIRI_LOWER, KAIRI_STOP_PCT, KAIRI_UPPER, NUM_SLOTS, _build_autobot_broker, _place_live_exit, get_allocated_balance
 from app.binance_broker import BinanceBroker
 from app.crypto import encrypt_secret
 from app.engine import price_roi_pct
@@ -64,37 +64,18 @@ def dashboard():
     total_realized_pnl = db.session.query(db.func.coalesce(db.func.sum(AutoBotPosition.realized_pnl_usd), 0.0)).filter(
         AutoBotPosition.user_id == current_user.id, AutoBotPosition.status != "open",
     ).scalar()
-    # Saldo total: the REAL current Binance balance, not
-    # settings.capital_usd + total_realized_pnl. That formula was only
-    # correct back when entries were sized off settings.capital_usd
-    # directly -- since 2026-09-15 entries size off 10% of the REAL
-    # balance instead (see autobot_engine.py's _check_entries_for_user),
-    # so capital_usd is just a stale, user-edited number that no longer
-    # tracks what the account actually has. The real balance already
-    # reflects every deposit/withdrawal and every realized/unrealized
-    # result, with no bookkeeping drift possible.
-    #
-    # % acumulado: computed against the IMPLIED starting balance
-    # (saldo_total - total_realized_pnl), i.e. what the account would
-    # have without the bot's own realized result -- same "% relative to
-    # a starting basis" the user confirmed was the right idea for this
-    # metric (2026-09-15, "ENTENDI O CALCULO, PODE MANTER ASSIM"), just
-    # rebased onto the real balance instead of the stale capital_usd
-    # field. Assumes no manual deposit/withdrawal happened mid-period on
-    # top of the bot's own trades -- same limitation the old formula had.
-    encryption_key = current_app.config["ENCRYPTION_KEY"]
-    broker, broker_err = _build_autobot_broker(current_user.id, encryption_key, current_app.config["AUTOBOT_TESTNET"])
-    real_balance, bal_err = broker.get_account_balance() if broker else (None, broker_err)
-    if real_balance is not None:
-        saldo_total = real_balance
-        starting_balance = saldo_total - total_realized_pnl
-        pct_total = (total_realized_pnl / starting_balance * 100) if starting_balance > 0 else 0.0
-    else:
-        # No valid credential yet, or the Binance call failed -- fall
-        # back to the old capital_usd-based estimate rather than
-        # showing nothing, and flag it as an estimate in the template.
-        saldo_total = settings.capital_usd + total_realized_pnl
-        pct_total = (total_realized_pnl / settings.capital_usd * 100) if settings.capital_usd > 0 else 0.0
+    # Saldo total / % acumulado: the Auto-bot's OWN allocated balance
+    # (capital_usd + this bot's own realized PnL), NOT
+    # broker.get_account_balance() (the account's real total Binance
+    # balance). Tried the real balance first (2026-09-15) but reverted
+    # 2026-09-17: this Binance account also holds capital used for
+    # other things on the same wallet, so the real total overstates
+    # what's actually "the bot's" -- and get_allocated_balance() is the
+    # exact same figure _check_entries_for_user now sizes entries off,
+    # so this scoreboard and real order sizes always agree. See its
+    # docstring in autobot_engine.py.
+    saldo_total = get_allocated_balance(current_user.id)
+    pct_total = (total_realized_pnl / settings.capital_usd * 100) if settings.capital_usd > 0 else 0.0
     win_rate = (win_count / trade_count * 100) if trade_count > 0 else 0.0
 
     return render_template(
@@ -115,7 +96,6 @@ def dashboard():
         total_realized_pnl=total_realized_pnl,
         pct_total=pct_total,
         saldo_total=saldo_total,
-        saldo_is_real=real_balance is not None,
     )
 
 
