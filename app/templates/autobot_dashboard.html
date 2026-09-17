@@ -29,7 +29,7 @@
 
 <div class="panel">
   <div class="panel-title">Capital e alavancagem</div>
-  <p class="sub">Cada entrada nova usa 10% do capital ALOCADO ao Auto-bot (1/{{ num_slots }}, até {{ num_slots }} entradas simultâneas) -- é reinvestimento automático: esse capital cresce ou encolhe sozinho com o resultado acumulado do bot, sem precisar editar nada aqui. Não é o saldo real da sua conta inteira na Binance -- só a fatia que você dedica abaixo, já que a mesma conta também é usada pra outras coisas.</p>
+  <p class="sub">Cada entrada nova usa {{ '%.0f'|format(100 / num_slots) }}% do capital ALOCADO ao Auto-bot (1/{{ num_slots }}, até {{ num_slots }} entradas simultâneas) -- é reinvestimento automático: esse capital cresce ou encolhe sozinho com o resultado acumulado do bot, sem precisar editar nada aqui. Não é o saldo real da sua conta inteira na Binance -- só a fatia que você dedica abaixo, já que a mesma conta também é usada pra outras coisas.</p>
   <form method="post" action="{{ url_for('autobot.save_settings') }}">
     <div class="row2">
       <div class="field"><span class="field-label">Capital dedicado ao Auto-bot (USD)</span><input type="number" step="1" min="50" name="capital_usd" value="{{ settings.capital_usd }}"></div>

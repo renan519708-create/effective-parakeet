@@ -223,11 +223,14 @@ class AutoBotCredential(db.Model):
 
 
 class AutoBotSettings(db.Model):
-    """One row per user. capital_usd is the TOTAL the user set aside
-    for the Auto-bot (not per-trade) -- each entry sizes at
-    capital_usd / NUM_SLOTS (see app/autobot_engine.py), non-compounding
-    (recomputed from this fixed setting, never from the running
-    balance)."""
+    """One row per user. capital_usd is the amount the user dedicated
+    to the Auto-bot when they started (a fixed starting point, not a
+    live per-trade knob) -- each entry sizes at
+    get_allocated_balance(user_id) / NUM_SLOTS (see
+    app/autobot_engine.py), where get_allocated_balance is capital_usd
+    PLUS every closed position's own realized PnL to date: compounds
+    off the bot's own results without being polluted by other capital
+    that may sit on the same Binance account."""
     __tablename__ = "autobot_settings"
 
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)

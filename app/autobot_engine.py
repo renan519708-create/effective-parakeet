@@ -36,7 +36,13 @@ KAIRI_UPPER = 2.0
 KAIRI_LOWER = -2.0
 KAIRI_STOP_PCT = 10.0
 MAX_DAILY_STOPS = 2
-NUM_SLOTS = 10
+# NUM_SLOTS doubles as both the max simultaneous positions AND the
+# sizing fraction (margin_usd = allocated_balance / NUM_SLOTS) -- 20
+# matches gg-shot-monitor's own config.json ("kairi_max_open_trades":
+# 20), per explicit request 2026-09-17 to bring this account closer to
+# the backtested/dashboard config: 20 slots = 5% of the allocated
+# balance per entry (was 10 slots = 10%).
+NUM_SLOTS = 20
 CANDLE_LOOKBACK = KAIRI_LENGTH + 10
 UNIVERSE_TOP_N = 50
 ENGINE_MAX_WORKERS = 10
@@ -323,9 +329,11 @@ def _check_entries_for_user(app, user_id, testnet, encryption_key, signals, pric
             if not broker:
                 return
 
-            # Compounding, per explicit request 2026-09-15: 10% of the
-            # Auto-bot's OWN allocated balance per entry (1 / NUM_SLOTS)
-            # -- grows or shrinks with realized profit/loss.
+            # Compounding, per explicit request 2026-09-15: 1/NUM_SLOTS
+            # of the Auto-bot's OWN allocated balance per entry (5%
+            # since 2026-09-17, NUM_SLOTS=20 to match gg-shot-monitor's
+            # own "kairi_max_open_trades") -- grows or shrinks with
+            # realized profit/loss.
             # Deliberately get_allocated_balance() (capital_usd + this
             # bot's own realized PnL), NOT broker.get_account_balance():
             # that was tried first but corrected 2026-09-17 -- this
